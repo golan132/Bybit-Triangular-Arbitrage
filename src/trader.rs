@@ -50,7 +50,7 @@ impl ArbitrageTrader {
     }
 
     /// Execute a complete arbitrage opportunity
-    pub async fn execute_arbitrage(&self, opportunity: &ArbitrageOpportunity, amount: f64) -> Result<ArbitrageExecutionResult> {
+    pub async fn execute_arbitrage(&mut self, opportunity: &ArbitrageOpportunity, amount: f64) -> Result<ArbitrageExecutionResult> {
         let start_time = std::time::Instant::now();
         
         if self.dry_run {
@@ -96,11 +96,12 @@ impl ArbitrageTrader {
                             actual_received
                         },
                         3 => {
-                            // Step 3: USDC → USDT, we sold USDC and got USDT
-                            // USDT received = USDC_sold * execution_price
-                            let usdt_received = execution.executed_quantity * execution.executed_price;
-                            info!("💰 Step 3: Final USDT received: {:.8}", usdt_received);
-                            usdt_received
+                            // Step 3: Converting back to start currency (usually USDT)
+                            // For triangular arbitrage, this should give us USDT back
+                            // The executed_quantity is the amount we received in the start currency
+                            let final_amount = execution.executed_quantity;
+                            info!("💰 Step 3: Final {} received: {:.8}", &opportunity.path[3], final_amount);
+                            final_amount
                         },
                         _ => execution.executed_quantity
                     };
@@ -218,7 +219,7 @@ impl ArbitrageTrader {
 
     /// Execute a single trade step
     async fn execute_trade_step(
-        &self, 
+        &mut self, 
         step: usize, 
         symbol: &str, 
         amount: f64, 
@@ -340,17 +341,17 @@ impl ArbitrageTrader {
         let (side, quantity) = match step {
             1 => {
                 // Step 1: Convert start currency to first intermediate currency
-                let from = &path[0]; // USDT
-                let to = &path[1];   // ICP
+                let from = &path[0];
+                let to = &path[1];
                 info!("Step 1: Converting {} to {} via {}", from, to, symbol);
                 
-                // For market buy orders, quantity represents the quote currency amount we're spending
-                ("Buy".to_string(), amount) // Buy ICP with USDT
+                let (action, qty) = self.determine_trade_action(symbol, from, to, amount).await?;
+                (action, qty)
             },
             2 => {
                 // Step 2: Convert first intermediate to second intermediate currency
-                let from = &path[1]; // USDC (what we have from step 1)
-                let to = &path[2];   // NEAR (what we want to get)
+                let from = &path[1];
+                let to = &path[2];
                 info!("Step 2: Converting {} to {} via {}", from, to, symbol);
                 
                 // Use actual available balance with a more conservative buffer
@@ -359,23 +360,13 @@ impl ArbitrageTrader {
                 
                 info!("💰 Available {} balance: {:.8}, using: {:.8}", from, actual_balance, safe_quantity);
                 
-                // Determine trade direction based on pair format
-                // For NEARUSDC: NEAR is base, USDC is quote
-                // To convert USDC → NEAR, we Buy NEAR with USDC (spending USDC)
-                if symbol.starts_with(to) && symbol.ends_with(from) {
-                    // Symbol is like NEARUSDC, we want to buy NEAR with USDC
-                    ("Buy".to_string(), safe_quantity) // Buy NEAR with USDC
-                } else if symbol.starts_with(from) && symbol.ends_with(to) {
-                    // Symbol is like USDCNEAR, we want to sell USDC for NEAR
-                    ("Sell".to_string(), safe_quantity) // Sell USDC for NEAR
-                } else {
-                    return Err(anyhow::anyhow!("Cannot determine trade direction for {} converting {} to {}", symbol, from, to));
-                }
+                let (action, _) = self.determine_trade_action(symbol, from, to, safe_quantity).await?;
+                (action, safe_quantity)
             },
             3 => {
                 // Step 3: Convert second intermediate back to start currency
-                let from = &path[2]; // NEAR (what we have from step 2)
-                let to = &path[3];   // USDT (back to start)
+                let from = &path[2];
+                let to = &path[3];
                 info!("Step 3: Converting {} to {} via {}", from, to, symbol);
                 
                 // Use actual available balance
@@ -384,16 +375,8 @@ impl ArbitrageTrader {
                 
                 info!("💰 Available {} balance: {:.8}, using: {:.8} for next step", from, actual_balance, safe_quantity);
                 
-                // Determine trade direction based on pair format
-                if symbol.starts_with(to) && symbol.ends_with(from) {
-                    // Symbol is like USDTNEAR, we want to buy USDT with NEAR
-                    ("Buy".to_string(), safe_quantity) // Buy USDT with NEAR
-                } else if symbol.starts_with(from) && symbol.ends_with(to) {
-                    // Symbol is like NEARUSDT, we want to sell NEAR for USDT
-                    ("Sell".to_string(), safe_quantity) // Sell NEAR for USDT
-                } else {
-                    return Err(anyhow::anyhow!("Cannot determine trade direction for {} converting {} to {}", symbol, from, to));
-                }
+                let (action, _) = self.determine_trade_action(symbol, from, to, safe_quantity).await?;
+                (action, safe_quantity)
             },
             _ => {
                 return Err(anyhow::anyhow!("Invalid step number: {}", step));
@@ -402,6 +385,48 @@ impl ArbitrageTrader {
         
         info!("💡 Trade decision: {} {:.6} on {}", side, quantity, symbol);
         Ok((side, quantity))
+    }
+
+    /// Determine the correct trade action (Buy/Sell) for converting from one currency to another
+    /// Based on Bybit's symbol format: ABCXYZ where ABC=base, XYZ=quote
+    async fn determine_trade_action(
+        &self,
+        symbol: &str,
+        from_currency: &str,
+        to_currency: &str,
+        amount: f64,
+    ) -> Result<(String, f64)> {
+        // Get symbol information to determine base and quote currencies
+        let precision_info = self.precision_manager.get_symbol_precision(symbol)
+            .ok_or_else(|| anyhow::anyhow!("Symbol {} not found in precision manager", symbol))?;
+
+        let base_coin = &precision_info.base_coin;
+        let quote_coin = &precision_info.quote_coin;
+        
+        info!("🧭 Symbol {}: base={}, quote={} | Converting {} → {}", 
+              symbol, base_coin, quote_coin, from_currency, to_currency);
+
+        // Apply the algorithm from the user's requirements:
+        // When converting from token A to token B:
+        // if exists symbol A + B (AB): action = SELL A (base) → receive B (quote)
+        // else if exists symbol B + A (BA): action = BUY B (base) using A (quote)
+        
+        if base_coin == from_currency && quote_coin == to_currency {
+            // Symbol format is FROM+TO (e.g., USDCUSDT for USDC→USDT)
+            // Action: SELL from_currency (base) to get to_currency (quote)
+            info!("✅ Direct pair {}: SELL {} to get {}", symbol, from_currency, to_currency);
+            Ok(("Sell".to_string(), amount))
+        } else if base_coin == to_currency && quote_coin == from_currency {
+            // Symbol format is TO+FROM (e.g., USDCUSDT for USDT→USDC)  
+            // Action: BUY to_currency (base) using from_currency (quote)
+            info!("✅ Reverse pair {}: BUY {} using {}", symbol, to_currency, from_currency);
+            Ok(("Buy".to_string(), amount))
+        } else {
+            return Err(anyhow::anyhow!(
+                "Cannot convert {} → {} using symbol {} (base: {}, quote: {})", 
+                from_currency, to_currency, symbol, base_coin, quote_coin
+            ));
+        }
     }
 
     /// Get actual available balance for a currency
@@ -518,12 +543,36 @@ impl ArbitrageTrader {
 
     /// Place order with automatic precision retry on API Error 170137 and 170148
     async fn place_order_with_precision_retry(
-        &self, 
+        &mut self, 
         symbol: &str, 
         side: &str, 
         quantity: f64, 
         step: usize
     ) -> Result<crate::models::PlaceOrderResult> {
+        // First try with cached working decimals if available
+        if let Some(cached_decimals) = self.precision_manager.get_cached_decimals(symbol) {
+            info!("🎯 Using cached decimals for {}: {} decimals", symbol, cached_decimals);
+            let formatted_quantity = self.precision_manager.format_quantity_smart(symbol, quantity);
+            
+            match self.attempt_order_placement(symbol, side, &formatted_quantity, step).await {
+                Ok(order_result) => {
+                    info!("✅ Order placed successfully using cached precision: {}", order_result.order_id);
+                    return Ok(order_result);
+                },
+                Err(e) => {
+                    let error_str = e.to_string();
+                    if error_str.contains("170137") || error_str.contains("170148") || error_str.contains("too many decimals") {
+                        warn!("⚠️ Cached precision failed for {}, falling back to retry logic", symbol);
+                        // Continue to retry logic below
+                    } else {
+                        // Non-precision error, return immediately
+                        return Err(e);
+                    }
+                }
+            }
+        }
+
+        // Fallback to traditional retry logic
         const MAX_RETRIES: u32 = 6; // Start with 6 decimals, can reduce to 0
         
         for retry_count in 0..=MAX_RETRIES {
@@ -552,28 +601,15 @@ impl ArbitrageTrader {
 
             info!("📊 Using precision for {}: {:.8} (formatted: {})", symbol, actual_quantity, formatted_quantity);
 
-            let order_link_id = format!("arb_{}_{}", Uuid::new_v4().simple(), step);
-
-            // Create market order for immediate execution
-            let order_request = PlaceOrderRequest {
-                category: "spot".to_string(),
-                symbol: symbol.to_string(),
-                side: side.to_string(),
-                order_type: "Market".to_string(),
-                qty: formatted_quantity.clone(),
-                price: None, // Market order
-                time_in_force: Some("IOC".to_string()), // Immediate or Cancel
-                order_link_id: Some(order_link_id.clone()),
-                reduce_only: None,
-            };
-
-            info!("Placing {} order: {} {} @ {:?}", 
-                  side, formatted_quantity, symbol, order_request.price);
-
             // Attempt to place the order
-            match self.client.place_order(order_request).await {
+            match self.attempt_order_placement(symbol, side, &formatted_quantity, step).await {
                 Ok(order_result) => {
                     info!("✅ Order placed successfully on attempt #{}: {}", retry_count + 1, order_result.order_id);
+                    
+                    // Cache the working decimal places for future use
+                    let working_decimals = 6 - retry_count;
+                    self.precision_manager.cache_working_decimals(symbol, working_decimals);
+                    
                     return Ok(order_result);
                 },
                 Err(e) => {
@@ -615,5 +651,39 @@ impl ArbitrageTrader {
         }
         
         Err(anyhow::anyhow!("Unexpected end of retry loop"))
+    }
+
+    /// Helper method to attempt order placement
+    async fn attempt_order_placement(
+        &self,
+        symbol: &str,
+        side: &str,
+        formatted_quantity: &str,
+        step: usize
+    ) -> Result<crate::models::PlaceOrderResult> {
+        let order_link_id = format!("arb_{}_{}", Uuid::new_v4().simple(), step);
+
+        // Create market order for immediate execution
+        let order_request = PlaceOrderRequest {
+            category: "spot".to_string(),
+            symbol: symbol.to_string(),
+            side: side.to_string(),
+            order_type: "Market".to_string(),
+            qty: formatted_quantity.to_string(),
+            price: None, // Market order
+            time_in_force: Some("IOC".to_string()), // Immediate or Cancel
+            order_link_id: Some(order_link_id.clone()),
+            reduce_only: None,
+        };
+
+        info!("Placing {} order: {} {} @ {:?}", 
+              side, formatted_quantity, symbol, order_request.price);
+
+        self.client.place_order(order_request).await
+    }
+
+    /// Get a reference to the precision manager (for cache access)
+    pub fn get_precision_manager(&self) -> &PrecisionManager {
+        &self.precision_manager
     }
 }

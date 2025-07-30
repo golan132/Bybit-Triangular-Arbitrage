@@ -159,7 +159,11 @@ impl BalanceManager {
 
     /// Log initial account scanning configuration (call once at startup)
     pub fn log_initial_scanning_info(&self) {
-        self.log_initial_scanning_info_with_min_amount(50.0); // Updated to $50 minimum
+        let default_order_size = std::env::var("ORDER_SIZE")
+            .unwrap_or_else(|_| "50.0".to_string())
+            .parse::<f64>()
+            .unwrap_or(50.0);
+        self.log_initial_scanning_info_with_min_amount(default_order_size);
     }
 
     /// Log initial account scanning configuration with minimum trade amount filtering

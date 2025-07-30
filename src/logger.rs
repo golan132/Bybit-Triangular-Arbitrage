@@ -28,15 +28,16 @@ pub fn init_logger() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-/// Log application startup information
-pub fn log_startup_info() {
+/// Log configuration with runtime values
+pub fn log_startup_info(min_profit_threshold: f64, trading_fee_rate: f64) {
     info!("📈 Bybit Triangular Arbitrage Bot v{}", env!("CARGO_PKG_VERSION"));
     info!("⚡ Powered by Rust for high-performance trading analysis");
     info!("🎯 Mode: Real Trading Analysis (No Testnet)");
     
     // Log some configuration info (without sensitive data)
     info!("📋 Configuration:");
-    info!("  • Min Profit Threshold: {:.2}%", crate::config::MIN_PROFIT_THRESHOLD);
+    info!("  • Min Profit Threshold: {:.2}%", min_profit_threshold);
+    info!("  • Trading Fee Rate: {:.2}% per trade", trading_fee_rate * 100.0);
     info!("  • Max Triangles to Scan: {}", crate::config::MAX_TRIANGLES_TO_SCAN);
     info!("  • Balance Refresh: {}s", crate::config::BALANCE_REFRESH_INTERVAL_SECS);
     info!("  • Price Refresh: {}s", crate::config::PRICE_REFRESH_INTERVAL_SECS);

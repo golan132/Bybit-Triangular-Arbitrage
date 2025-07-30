@@ -10,6 +10,9 @@ pub struct Config {
     pub testnet: bool,
     pub request_timeout_secs: u64,
     pub max_retries: u32,
+    pub order_size: f64,
+    pub min_profit_threshold: f64,
+    pub trading_fee_rate: f64,
 }
 
 impl Config {
@@ -44,6 +47,21 @@ impl Config {
             .parse::<u32>()
             .unwrap_or(3);
 
+        let order_size = env::var("ORDER_SIZE")
+            .unwrap_or_else(|_| "4.0".to_string())
+            .parse::<f64>()
+            .unwrap_or(4.0);
+
+        let min_profit_threshold = env::var("MIN_PROFIT_THRESHOLD")
+            .unwrap_or_else(|_| "0.5".to_string())
+            .parse::<f64>()
+            .unwrap_or(0.5);
+
+        let trading_fee_rate = env::var("TRADING_FEE_RATE")
+            .unwrap_or_else(|_| "0.0015".to_string())
+            .parse::<f64>()
+            .unwrap_or(0.0015);
+
         Ok(Config {
             api_key,
             api_secret,
@@ -51,6 +69,9 @@ impl Config {
             testnet,
             request_timeout_secs,
             max_retries,
+            order_size,
+            min_profit_threshold,
+            trading_fee_rate,
         })
     }
 
@@ -71,7 +92,7 @@ impl Config {
 }
 
 // Constants for arbitrage calculations
-pub const MIN_PROFIT_THRESHOLD: f64 = 0.01; // Show any profit above 0.01%
+pub const MIN_PROFIT_THRESHOLD: f64 = 0.5; // Show any profit above 0.5% (50 basis points)
 pub const MAX_TRIANGLES_TO_SCAN: usize = 1000; // Maximum triangles to process
 pub const BALANCE_REFRESH_INTERVAL_SECS: u64 = 300; // 5 minutes
 pub const PRICE_REFRESH_INTERVAL_SECS: u64 = 10; // 10 seconds

@@ -26,11 +26,10 @@ use trader::ArbitrageTrader;
 async fn main() -> Result<()> {
     // Initialize logging
     init_logger().context("Failed to initialize logger")?;
-    log_startup_info();
-
     // Load configuration
     log_phase("init", "Loading configuration");
     let config = Config::from_env().context("Failed to load configuration")?;
+    log_startup_info(config.min_profit_threshold, config.trading_fee_rate);
     
     // Create Bybit client
     let client = BybitClient::new(config.clone()).context("Failed to create Bybit client")?;
@@ -39,14 +38,29 @@ async fn main() -> Result<()> {
     // Initialize managers and trader
     let mut balance_manager = BalanceManager::new();
     let mut pair_manager = PairManager::new();
-    let mut arbitrage_engine = ArbitrageEngine::new();
+    let mut arbitrage_engine = ArbitrageEngine::with_config(
+        config.min_profit_threshold, 
+        1000, // max_scan_count 
+        config.trading_fee_rate
+    );
     
     // Initialize precision manager with dynamic data from Bybit
     log_phase("init", "Fetching precision data from Bybit API");
     let mut precision_manager = PrecisionManager::new();
+    
+    // Load cached precision data if available
+    if let Err(e) = precision_manager.load_cache_from_file("precision_cache.json") {
+        warn!("⚠️ Failed to load precision cache: {}", e);
+    }
+    
     precision_manager.initialize(&client).await
         .context("Failed to initialize precision manager")?;
     precision_manager.print_precision_summary();
+    
+    // Display precision cache statistics
+    let (total_cached, _) = precision_manager.get_cache_stats();
+    info!("📊 Precision Cache: {} symbols cached", total_cached);
+    
     log_success("Initialization", "Precision data loaded successfully");
     
     // Create arbitrage trader (set dry_run to false for live trading)
@@ -55,8 +69,8 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|_| "1".to_string())
         .parse::<u32>()
         .unwrap_or(1);
-            let min_trade_amount = 50.0; // Minimum trade amount in USD
-    let trader = ArbitrageTrader::new(client.clone(), dry_run, precision_manager.clone());
+    let min_trade_amount = config.order_size; // Order size from .env file
+    let mut trader = ArbitrageTrader::new(client.clone(), dry_run, precision_manager.clone());
     
     if dry_run {
         info!("🧪 Running in DRY RUN mode - no actual trades will be executed");
@@ -74,7 +88,7 @@ async fn main() -> Result<()> {
     // Main application loop - will exit after reaching max trades
     loop {
         cycle_count += 1;
-        match run_arbitrage_cycle(&client, &mut balance_manager, &mut pair_manager, &mut arbitrage_engine, &trader, cycle_count, &mut initial_scan_logged, &mut trades_completed, max_trades, min_trade_amount).await {
+        match run_arbitrage_cycle(&client, &mut balance_manager, &mut pair_manager, &mut arbitrage_engine, &mut trader, &precision_manager, cycle_count, &mut initial_scan_logged, &mut trades_completed, max_trades, min_trade_amount).await {
             Ok(should_exit) => {
                 if should_exit {
                     info!("🎯 TRADE LIMIT REACHED ({}/{}) - Bot stopping as requested", trades_completed, max_trades);
@@ -96,6 +110,11 @@ async fn main() -> Result<()> {
         sleep(Duration::from_millis(100)).await;
     }
     
+    // Save precision cache on exit
+    if let Err(e) = trader.get_precision_manager().auto_save_cache() {
+        warn!("⚠️ Failed to save precision cache on exit: {}", e);
+    }
+    
     Ok(())
 }
 
@@ -104,7 +123,8 @@ async fn run_arbitrage_cycle(
     balance_manager: &mut BalanceManager,
     pair_manager: &mut PairManager,
     arbitrage_engine: &mut ArbitrageEngine,
-    trader: &ArbitrageTrader,
+    trader: &mut ArbitrageTrader,
+    precision_manager: &PrecisionManager,
     cycle_count: u64,
     initial_scan_logged: &mut bool,
     trades_completed: &mut u32,
@@ -198,6 +218,11 @@ async fn run_arbitrage_cycle(
                             
                             // Force balance refresh after successful trade
                             balance_manager.force_refresh();
+                            
+                            // Save precision cache after successful trade
+                            if let Err(e) = trader.get_precision_manager().auto_save_cache() {
+                                warn!("⚠️ Failed to save precision cache: {}", e);
+                            }
                             
                             if *trades_completed >= max_trades {
                                 info!("🏁 All {} trade(s) completed successfully - stopping bot", max_trades);

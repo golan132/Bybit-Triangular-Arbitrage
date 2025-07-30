@@ -63,7 +63,11 @@ impl ArbitrageEngine {
         pair_manager: &PairManager,
         balance_manager: &BalanceManager,
     ) -> Vec<ArbitrageOpportunity> {
-        self.scan_opportunities_with_min_amount(pair_manager, balance_manager, 50.0)
+        let default_order_size = std::env::var("ORDER_SIZE")
+            .unwrap_or_else(|_| "50.0".to_string())
+            .parse::<f64>()
+            .unwrap_or(50.0);
+        self.scan_opportunities_with_min_amount(pair_manager, balance_manager, default_order_size)
     }
 
     /// Scan for triangular arbitrage opportunities with minimum trade amount filtering

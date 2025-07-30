@@ -2,6 +2,9 @@ use crate::client::BybitClient;
 use crate::models::InstrumentsInfoResult;
 use anyhow::{Context, Result};
 use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
+use serde::{Deserialize, Serialize};
 use tracing::{info, warn, debug, error};
 
 #[derive(Debug, Clone)]
@@ -23,6 +26,8 @@ pub struct PrecisionManager {
     symbol_precision: HashMap<String, PrecisionInfo>,
     // Map of coin -> default precision for quantity formatting
     coin_precision: HashMap<String, u32>,
+    // Cache of working decimal places for each symbol (learned from successful trades)
+    working_decimals_cache: HashMap<String, u32>,
 }
 
 impl PrecisionManager {
@@ -30,6 +35,7 @@ impl PrecisionManager {
         Self {
             symbol_precision: HashMap::new(),
             coin_precision: HashMap::new(),
+            working_decimals_cache: HashMap::new(),
         }
     }
 
@@ -298,5 +304,83 @@ impl PrecisionManager {
             
             formatted
         }
+    }
+
+    /// Cache the working decimal places for a symbol after successful trade
+    pub fn cache_working_decimals(&mut self, symbol: &str, decimals: u32) {
+        info!("💾 Caching working decimals for {}: {} decimals", symbol, decimals);
+        self.working_decimals_cache.insert(symbol.to_string(), decimals);
+    }
+
+    /// Get cached working decimal places for a symbol
+    pub fn get_cached_decimals(&self, symbol: &str) -> Option<u32> {
+        self.working_decimals_cache.get(symbol).copied()
+    }
+
+    /// Format quantity using cached decimals if available, otherwise use API precision
+    pub fn format_quantity_smart(&self, symbol: &str, quantity: f64) -> String {
+        // First try to use cached working decimals
+        if let Some(cached_decimals) = self.get_cached_decimals(symbol) {
+            debug!("🎯 Using cached decimals for {}: {} decimals", symbol, cached_decimals);
+            let factor = 10_f64.powi(cached_decimals as i32);
+            let truncated = (quantity * factor).floor() / factor;
+            return format!("{:.prec$}", truncated, prec = cached_decimals as usize);
+        }
+
+        // Fallback to regular precision logic
+        if let Some(info) = self.symbol_precision.get(symbol) {
+            let adjusted_quantity = quantity.max(info.min_order_qty);
+            let max_decimals = info.qty_precision.min(8);
+            let factor = 10_f64.powi(max_decimals as i32);
+            let truncated = (adjusted_quantity * factor).floor() / factor;
+            format!("{:.prec$}", truncated, prec = max_decimals as usize)
+        } else {
+            // Ultimate fallback
+            format!("{:.6}", quantity)
+        }
+    }
+
+    /// Get cache statistics for debugging
+    pub fn get_cache_stats(&self) -> (usize, Vec<(String, u32)>) {
+        let total_cached = self.working_decimals_cache.len();
+        let mut cached_symbols: Vec<(String, u32)> = self.working_decimals_cache
+            .iter()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect();
+        cached_symbols.sort_by(|a, b| a.0.cmp(&b.0));
+        (total_cached, cached_symbols)
+    }
+
+    /// Save precision cache to file
+    pub fn save_cache_to_file(&self, file_path: &str) -> Result<()> {
+        let json = serde_json::to_string_pretty(&self.working_decimals_cache)
+            .context("Failed to serialize precision cache")?;
+        fs::write(file_path, json)
+            .context("Failed to write precision cache to file")?;
+        info!("💾 Saved precision cache ({} symbols) to {}", self.working_decimals_cache.len(), file_path);
+        Ok(())
+    }
+
+    /// Load precision cache from file
+    pub fn load_cache_from_file(&mut self, file_path: &str) -> Result<()> {
+        if !Path::new(file_path).exists() {
+            info!("📁 No precision cache file found at {}, starting with empty cache", file_path);
+            return Ok(());
+        }
+
+        let json = fs::read_to_string(file_path)
+            .context("Failed to read precision cache file")?;
+        let cache: HashMap<String, u32> = serde_json::from_str(&json)
+            .context("Failed to deserialize precision cache")?;
+        
+        let loaded_count = cache.len();
+        self.working_decimals_cache = cache;
+        info!("📂 Loaded precision cache ({} symbols) from {}", loaded_count, file_path);
+        Ok(())
+    }
+
+    /// Auto-save cache periodically or on program exit
+    pub fn auto_save_cache(&self) -> Result<()> {
+        self.save_cache_to_file("precision_cache.json")
     }
 }
