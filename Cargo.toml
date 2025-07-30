@@ -1,0 +1,25 @@
+[package]
+name = "bybit-arbitrage-bot"
+version = "0.1.0"
+edition = "2021"
+description = "High-performance triangular arbitrage bot for Bybit"
+authors = ["Your Name <your.email@example.com>"]
+
+[dependencies]
+tokio = { version = "1.0", features = ["full"] }
+reqwest = { version = "0.11", features = ["json"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1.0"
+thiserror = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+dotenv = "0.15"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+
+[dev-dependencies]
+mockito = "1.0"
