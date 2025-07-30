@@ -283,26 +283,30 @@ impl ArbitrageEngine {
                    current_amount);
         }
 
-        // Calculate profit
+        // Calculate profit with additional slippage buffer
         let profit_amount = current_amount - test_amount;
         let profit_pct = (profit_amount / test_amount) * 100.0;
 
+        // Apply realistic slippage penalty (0.2% per trade = 0.6% total for 3 trades)
+        let slippage_penalty = 0.6; // 0.6% total slippage
+        let profit_pct_with_slippage = profit_pct - slippage_penalty;
+
         // Estimate profit in USD (assuming USDT ≈ USD)
         let estimated_usd_profit = if triangle.base_currency == "USDT" || triangle.base_currency == "USDC" {
-            profit_amount * (initial_amount / test_amount)
+            (profit_amount - (test_amount * slippage_penalty / 100.0)) * (initial_amount / test_amount)
         } else {
             // For non-USD base currencies, we'd need price conversion
             // For now, use a conservative estimate
-            profit_amount * 0.5 * (initial_amount / test_amount)
+            (profit_amount - (test_amount * slippage_penalty / 100.0)) * 0.5 * (initial_amount / test_amount)
         };
 
-        if profit_pct > -50.0 && profit_pct.is_finite() {
+        if profit_pct_with_slippage > -50.0 && profit_pct_with_slippage.is_finite() {
             // Only return reasonable profit calculations
             let opportunity = ArbitrageOpportunity {
                 path: path.clone(),
                 pairs: pair_symbols,
                 prices,
-                estimated_profit_pct: profit_pct,
+                estimated_profit_pct: profit_pct_with_slippage,
                 estimated_profit_usd: estimated_usd_profit,
                 timestamp: Utc::now(),
             };

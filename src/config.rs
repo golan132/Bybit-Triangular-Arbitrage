@@ -99,10 +99,10 @@ pub const PRICE_REFRESH_INTERVAL_SECS: u64 = 10; // 10 seconds
 pub const CYCLE_SUMMARY_INTERVAL: usize = 300; // Log summary every 300 cycles
 
 // Realistic trading filters
-pub const MIN_VOLUME_24H_USD: f64 = 10000.0; // Minimum 24h volume in USD for liquidity (lowered)
+pub const MIN_VOLUME_24H_USD: f64 = 100000.0; // Minimum 24h volume in USD for liquidity (increased for safety)
 pub const MIN_BID_SIZE_USD: f64 = 100.0; // Minimum bid size in USD (lowered)
 pub const MIN_ASK_SIZE_USD: f64 = 100.0; // Minimum ask size in USD (lowered)
-pub const MAX_SPREAD_PERCENT: f64 = 5.0; // Maximum bid/ask spread percentage (increased)
+pub const MAX_SPREAD_PERCENT: f64 = 1.0; // Maximum bid/ask spread percentage (decreased for tighter spreads)
 pub const MAX_SLIPPAGE_PERCENT: f64 = 0.5; // Maximum acceptable slippage per trade
 pub const VWAP_DEPTH_LEVELS: usize = 5; // Number of order book levels for VWAP calculation
 pub const MIN_TRADE_AMOUNT_USD: f64 = 10.0; // Minimum trade amount for realistic execution
@@ -118,6 +118,7 @@ pub const BLACKLISTED_TOKENS: &[&str] = &[
     "LUNC",    // Terra Luna Classic - collapsed
     "USTC",    // TerraUSD Classic - collapsed
     "TRY",     // Turkish Lira - geographical restrictions (Error 170348)
+    "BRL",     // Brazilian Real - high slippage and low liquidity
     // ⚠️ Newly added delisted / restricted tokens:
     "RDNT",    // Delisted
     "MOVR",    // Delisted

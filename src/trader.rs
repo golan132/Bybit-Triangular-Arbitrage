@@ -109,6 +109,23 @@ impl ArbitrageTrader {
 
         // Execute each step of the arbitrage
         for (step, pair_symbol) in opportunity.pairs.iter().enumerate() {
+            // Check if execution is taking too long (abort after 10 seconds to prevent stale prices)
+            if start_time.elapsed() > Duration::from_secs(10) {
+                error!("❌ Aborting arbitrage: execution time exceeded 10 seconds (current: {}ms)", 
+                       start_time.elapsed().as_millis());
+                return Ok(ArbitrageExecutionResult {
+                    success: false,
+                    initial_amount: amount,
+                    final_amount: current_amount,
+                    actual_profit: current_amount - amount,
+                    actual_profit_pct: ((current_amount - amount) / amount) * 100.0,
+                    executions,
+                    total_fees,
+                    execution_time_ms: start_time.elapsed().as_millis() as u64,
+                    error_message: Some("Execution timeout - market conditions may have changed".to_string()),
+                });
+            }
+            
             // For steps 2 and 3, verify we have the balance from the previous step
             if step > 0 {
                 self.wait_for_balance_settlement(step + 1, opportunity).await?;
