@@ -5,6 +5,7 @@ use anyhow::{Result, Context};
 use tokio::time::{sleep, Duration};
 use tracing::{info, warn, error, debug};
 use uuid::Uuid;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct TradeExecution {
@@ -37,16 +38,56 @@ pub struct ArbitrageTrader {
     dry_run: bool,
     max_order_wait_time: Duration,
     precision_manager: PrecisionManager,
+    /// Cache for currency pair mappings: "FROMUPTO" -> (symbol, action)
+    /// e.g., "USDCUSDT" -> ("USDCUSDT", "SELL"), "USDTUSDC" -> ("USDCUSDT", "BUY")
+    symbol_map: HashMap<String, (String, String)>,
 }
 
 impl ArbitrageTrader {
     pub fn new(client: BybitClient, dry_run: bool, precision_manager: PrecisionManager) -> Self {
-        Self {
+        let mut trader = Self {
             client,
             dry_run,
             max_order_wait_time: Duration::from_secs(30),
             precision_manager,
+            symbol_map: HashMap::new(),
+        };
+        
+        // Initialize symbol mapping cache
+        trader.build_symbol_map();
+        trader
+    }
+
+    /// Build the symbol mapping cache for efficient lookups
+    /// Maps "FROM+TO" -> (symbol, action) for all available trading pairs
+    fn build_symbol_map(&mut self) {
+        info!("🗺️ Building symbol mapping cache...");
+        let mut mappings = 0;
+        
+        // Get all available symbols from precision manager
+        for (symbol, precision_info) in self.precision_manager.get_all_symbols() {
+            let base = &precision_info.base_coin;
+            let quote = &precision_info.quote_coin;
+            
+            // Example: For symbol ETHUSDT (base=ETH, quote=USDT):
+            // - Converting ETH → USDT: key "ETHUSDT" → (ETHUSDT, Sell) - sell ETH to get USDT
+            // - Converting USDT → ETH: key "USDTETH" → (ETHUSDT, Buy) - buy ETH using USDT
+            
+            // Map for direct conversion: FROM(base) -> TO(quote) = Sell base
+            let direct_key = format!("{}{}", base, quote);
+            self.symbol_map.insert(direct_key.clone(), (symbol.clone(), "Sell".to_string()));
+            
+            // Map for reverse conversion: FROM(quote) -> TO(base) = Buy base  
+            let reverse_key = format!("{}{}", quote, base);
+            self.symbol_map.insert(reverse_key.clone(), (symbol.clone(), "Buy".to_string()));
+            
+            mappings += 2;
+            debug!("📊 Mapped {}: {} → Sell {}, {} → Buy {}", 
+                   symbol, direct_key, base, reverse_key, base);
         }
+        
+        info!("✅ Symbol mapping complete: {} mappings for {} symbols", 
+              mappings, mappings / 2);
     }
 
     /// Execute a complete arbitrage opportunity
@@ -288,13 +329,16 @@ impl ArbitrageTrader {
                         let available_balance: f64 = coin_balance.wallet_balance.parse()
                             .unwrap_or(0.0);
                         
-        // For sell orders, we need the exact quantity of the asset
-        // For buy orders, we need enough of the paying currency
-        let required_amount = if side == "Sell" {
-            quantity
-        } else {
-            quantity // For market orders, this should be the spending amount
-        };                        if available_balance >= required_amount {
+                        // Calculate required amount based on order type
+                        let required_amount = if side == "Sell" {
+                            // For sell orders, we need the exact quantity of the asset
+                            quantity
+                        } else {
+                            // For buy orders, quantity is already the quote currency amount to spend
+                            quantity
+                        };
+                        
+                        if available_balance >= required_amount {
                             info!("✅ Balance check passed: {} {} available (need {:.6})", 
                                   available_balance, required_currency, required_amount);
                             return Ok(());
@@ -360,8 +404,8 @@ impl ArbitrageTrader {
                 
                 info!("💰 Available {} balance: {:.8}, using: {:.8}", from, actual_balance, safe_quantity);
                 
-                let (action, _) = self.determine_trade_action(symbol, from, to, safe_quantity).await?;
-                (action, safe_quantity)
+                let (action, converted_quantity) = self.determine_trade_action(symbol, from, to, safe_quantity).await?;
+                (action, converted_quantity)
             },
             3 => {
                 // Step 3: Convert second intermediate back to start currency
@@ -375,8 +419,8 @@ impl ArbitrageTrader {
                 
                 info!("💰 Available {} balance: {:.8}, using: {:.8} for next step", from, actual_balance, safe_quantity);
                 
-                let (action, _) = self.determine_trade_action(symbol, from, to, safe_quantity).await?;
-                (action, safe_quantity)
+                let (action, converted_quantity) = self.determine_trade_action(symbol, from, to, safe_quantity).await?;
+                (action, converted_quantity)
             },
             _ => {
                 return Err(anyhow::anyhow!("Invalid step number: {}", step));
@@ -389,6 +433,10 @@ impl ArbitrageTrader {
 
     /// Determine the correct trade action (Buy/Sell) for converting from one currency to another
     /// Based on Bybit's symbol format: ABCXYZ where ABC=base, XYZ=quote
+    /// Implements the algorithm: if exists symbol A+B: SELL A → get B, else if exists B+A: BUY B using A
+    /// Determine the correct trade action (Buy/Sell) for converting from one currency to another
+    /// Uses cached symbol mapping for O(1) lookup performance
+    /// Based on Bybit's symbol format: ABCXYZ where ABC=base, XYZ=quote
     async fn determine_trade_action(
         &self,
         symbol: &str,
@@ -396,17 +444,39 @@ impl ArbitrageTrader {
         to_currency: &str,
         amount: f64,
     ) -> Result<(String, f64)> {
-        // Get symbol information to determine base and quote currencies
+        info!("🧭 Converting {} → {} via {} (amount: {:.6})", 
+              from_currency, to_currency, symbol, amount);
+
+        // First, try the cached mapping approach for speed
+        if let Some((mapped_symbol, action)) = self.get_action_for_conversion(from_currency, to_currency) {
+            if mapped_symbol == symbol {
+                let final_quantity = if action == "Buy" {
+                    // For Buy orders, use the quote currency amount (amount to spend)
+                    amount
+                } else {
+                    // For Sell orders, amount is already in base currency
+                    amount
+                };
+                
+                info!("✅ Cached mapping: {} {} on {} (final quantity: {:.8})", action, 
+                      if action == "Sell" { from_currency } else { to_currency }, symbol, final_quantity);
+                return Ok((action, final_quantity));
+            } else {
+                warn!("⚠️ Symbol mismatch: expected {}, got {} from cache", symbol, mapped_symbol);
+            }
+        }
+
+        // Fallback: Get symbol information from precision manager
         let precision_info = self.precision_manager.get_symbol_precision(symbol)
             .ok_or_else(|| anyhow::anyhow!("Symbol {} not found in precision manager", symbol))?;
 
         let base_coin = &precision_info.base_coin;
         let quote_coin = &precision_info.quote_coin;
         
-        info!("🧭 Symbol {}: base={}, quote={} | Converting {} → {}", 
+        info!("🔍 Fallback lookup - Symbol {}: base={}, quote={} | Converting {} → {}", 
               symbol, base_coin, quote_coin, from_currency, to_currency);
 
-        // Apply the algorithm from the user's requirements:
+        // Apply the algorithm from your documentation:
         // When converting from token A to token B:
         // if exists symbol A + B (AB): action = SELL A (base) → receive B (quote)
         // else if exists symbol B + A (BA): action = BUY B (base) using A (quote)
@@ -417,15 +487,64 @@ impl ArbitrageTrader {
             info!("✅ Direct pair {}: SELL {} to get {}", symbol, from_currency, to_currency);
             Ok(("Sell".to_string(), amount))
         } else if base_coin == to_currency && quote_coin == from_currency {
-            // Symbol format is TO+FROM (e.g., USDCUSDT for USDT→USDC)  
+            // Symbol format is TO+FROM (e.g., NOTUSDC for USDC→NOT)  
             // Action: BUY to_currency (base) using from_currency (quote)
-            info!("✅ Reverse pair {}: BUY {} using {}", symbol, to_currency, from_currency);
+            // For Buy orders, Bybit expects the quote currency amount (amount to spend)
+            info!("✅ Reverse pair {}: BUY {} using {} (spending: {:.6} {})", 
+                  symbol, to_currency, from_currency, amount, from_currency);
             Ok(("Buy".to_string(), amount))
         } else {
             return Err(anyhow::anyhow!(
                 "Cannot convert {} → {} using symbol {} (base: {}, quote: {})", 
                 from_currency, to_currency, symbol, base_coin, quote_coin
             ));
+        }
+    }
+
+    /// Convert quote currency amount to base currency quantity for Buy orders
+    /// Example: Convert 25 USDC to equivalent NOT tokens based on current market price
+    async fn convert_quote_to_base_quantity(&self, symbol: &str, quote_amount: f64) -> Result<f64> {
+        // Get current market price
+        let market_price = self.get_estimated_market_price(symbol).await
+            .ok_or_else(|| anyhow::anyhow!("Failed to get market price for {}", symbol))?;
+        
+        // Calculate how many base tokens we can buy with the quote amount
+        let base_quantity = quote_amount / market_price;
+        
+        // Get precision info to validate against minimum order requirements
+        let precision_info = self.precision_manager.get_symbol_precision(symbol)
+            .ok_or_else(|| anyhow::anyhow!("Symbol {} not found in precision manager", symbol))?;
+        
+        // Check if calculated quantity meets minimum order requirements
+        if base_quantity < precision_info.min_order_qty {
+            return Err(anyhow::anyhow!(
+                "Calculated quantity {:.8} {} is below minimum {:.8} for symbol {} (spending {:.6} at price {:.8})",
+                base_quantity, precision_info.base_coin, precision_info.min_order_qty, symbol, quote_amount, market_price
+            ));
+        }
+        
+        info!("💱 Conversion: {:.6} {} ÷ {:.8} = {:.8} {} (min: {:.8})", 
+              quote_amount, precision_info.quote_coin, market_price, 
+              base_quantity, precision_info.base_coin, precision_info.min_order_qty);
+        
+        Ok(base_quantity)
+    }
+
+    /// Get action for currency conversion using cached symbol mapping
+    /// Returns (symbol, action) where action is "Sell" or "Buy"
+    /// O(1) lookup using prebuilt HashMap - much faster than string concatenation + precision manager lookups
+    fn get_action_for_conversion(&self, from: &str, to: &str) -> Option<(String, String)> {
+        let key = format!("{}{}", from.to_uppercase(), to.to_uppercase());
+        
+        if let Some((symbol, action)) = self.symbol_map.get(&key) {
+            info!("🎯 Found mapping {}: {} {} using {}", 
+                  key, action, 
+                  if action == "Sell" { from } else { to }, 
+                  symbol);
+            Some((symbol.clone(), action.clone()))
+        } else {
+            info!("❌ No mapping found for {} → {} (key: {})", from, to, key);
+            None
         }
     }
 
@@ -587,14 +706,25 @@ impl ArbitrageTrader {
                       retry_count, symbol, 6 - retry_count, actual_quantity);
             }
             
-            // Validate the truncated quantity meets symbol requirements
-            if let Err(e) = self.precision_manager.validate_quantity(symbol, actual_quantity) {
-                return Err(anyhow::anyhow!("Quantity validation failed: {}", e));
+            // Validate the truncated quantity meets symbol requirements  
+            // For Buy orders, we're using quote currency amounts, so skip base currency validations
+            if side == "Sell" {
+                if let Err(e) = self.precision_manager.validate_quantity(symbol, actual_quantity) {
+                    return Err(anyhow::anyhow!("Quantity validation failed: {}", e));
+                }
             }
 
             // For market orders, estimate price for order value validation
             if let Some(market_price) = self.get_estimated_market_price(symbol).await {
-                if let Err(e) = self.precision_manager.validate_order_value(symbol, actual_quantity, market_price) {
+                // For Buy orders, the order value is the quote amount we're spending (already in quantity)
+                // For Sell orders, the order value is quantity * price
+                let order_value = if side == "Buy" {
+                    actual_quantity // For Buy orders, quantity is already the quote currency amount
+                } else {
+                    actual_quantity * market_price // For Sell orders, calculate value
+                };
+                
+                if let Err(e) = self.precision_manager.validate_order_value(symbol, order_value, 1.0) {
                     return Err(anyhow::anyhow!("Order value validation failed: {}", e));
                 }
             }

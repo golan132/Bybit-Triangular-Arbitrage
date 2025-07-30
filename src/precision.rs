@@ -249,6 +249,11 @@ impl PrecisionManager {
         self.symbol_precision.keys().cloned().collect()
     }
 
+    /// Get all symbols with their precision info for building mappings
+    pub fn get_all_symbols(&self) -> &HashMap<String, PrecisionInfo> {
+        &self.symbol_precision
+    }
+
     /// Print precision summary for debugging
     pub fn print_precision_summary(&self) {
         info!("📊 Precision Summary:");
