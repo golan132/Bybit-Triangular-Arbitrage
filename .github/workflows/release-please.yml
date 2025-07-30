@@ -11,6 +11,14 @@ permissions:
   contents: write
   issues: write
   pull-requests: write
+  actions: write
+  checks: write
+  deployments: write
+  discussions: write
+  pages: write
+  repository-projects: write
+  security-events: write
+  statuses: write
 
 jobs:
   release:
@@ -26,6 +34,7 @@ jobs:
         uses: googleapis/release-please-action@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
 
       # Build and upload release artifacts if a release was created
       - name: Setup Rust
