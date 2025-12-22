@@ -1,9 +1,9 @@
 use crate::client::BybitClient;
 use crate::config;
-use crate::models::{InstrumentInfo, MarketPair, TickerInfo};
+use crate::models::MarketPair;
 use anyhow::{Context, Result};
 use std::collections::HashMap;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 pub struct PairManager {
     pairs: Vec<MarketPair>,
@@ -112,7 +112,7 @@ impl PairManager {
                         pair.price = price;
                         
                         // Also update bid/ask if available
-                        if let (Ok(bid), Ok(ask)) = (ticker.bid1Price.parse::<f64>(), ticker.ask1Price.parse::<f64>()) {
+                        if let (Ok(bid), Ok(ask)) = (ticker.bid1_price.parse::<f64>(), ticker.ask1_price.parse::<f64>()) {
                             // Only update if prices are valid and positive
                             if bid > 0.0 && ask > 0.0 {
                                 pair.bid_price = bid;
@@ -138,8 +138,8 @@ impl PairManager {
                         pair.volume_24h_usd = volume_24h_usd;
 
                         // Re-evaluate liquidity
-                        let bid_size = ticker.bid1Size.parse().unwrap_or(0.0);
-                        let ask_size = ticker.ask1Size.parse().unwrap_or(0.0);
+                        let bid_size = ticker.bid1_size.parse().unwrap_or(0.0);
+                        let ask_size = ticker.ask1_size.parse().unwrap_or(0.0);
                         pair.bid_size = bid_size;
                         pair.ask_size = ask_size;
 
@@ -188,25 +188,6 @@ impl PairManager {
         self.symbol_to_pair
             .get(symbol)
             .and_then(|&idx| self.pairs.get(idx))
-    }
-
-    /// Get current price for a symbol
-    pub fn get_price(&self, symbol: &str) -> Option<f64> {
-        self.price_map.get(symbol).copied()
-    }
-
-    /// Update price for a specific symbol (for real-time updates)
-    pub fn update_price(&mut self, symbol: &str, price: f64) {
-        if let Some(existing_price) = self.price_map.get_mut(symbol) {
-            *existing_price = price;
-        }
-
-        // Also update the price in the corresponding MarketPair
-        if let Some(&idx) = self.symbol_to_pair.get(symbol) {
-            if let Some(pair) = self.pairs.get_mut(idx) {
-                pair.price = price;
-            }
-        }
     }
 
     /// Find pairs that could form triangular arbitrage with given base currency
@@ -413,31 +394,6 @@ impl PairManager {
             }
         }
     }
-
-    /// Filter pairs by minimum price and volume requirements
-    pub fn filter_liquid_pairs(&self, min_price: f64, _min_volume_24h: f64) -> Vec<&MarketPair> {
-        self.pairs
-            .iter()
-            .filter(|pair| {
-                pair.price >= min_price 
-                    && pair.is_active
-                    // Note: We'd need 24h volume data from tickers for complete filtering
-            })
-            .collect()
-    }
-
-    /// Get pairs suitable for arbitrage (active, reasonable prices)
-    pub fn get_arbitrage_suitable_pairs(&self) -> Vec<&MarketPair> {
-        self.pairs
-            .iter()
-            .filter(|pair| {
-                pair.is_active 
-                    && pair.price > 0.0 
-                    && pair.price.is_finite()
-                    && pair.min_qty > 0.0
-            })
-            .collect()
-    }
 }
 
 impl Default for PairManager {
@@ -453,20 +409,6 @@ pub struct TrianglePairs {
     pub pair2: MarketPair,
     pub pair3: MarketPair,
     pub path: Vec<String>,
-}
-
-impl TrianglePairs {
-    pub fn get_symbols(&self) -> Vec<String> {
-        vec![
-            self.pair1.symbol.clone(),
-            self.pair2.symbol.clone(),
-            self.pair3.symbol.clone(),
-        ]
-    }
-
-    pub fn display_path(&self) -> String {
-        self.path.join(" → ")
-    }
 }
 
 #[derive(Debug, Clone, Default)]

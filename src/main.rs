@@ -24,6 +24,9 @@ use trader::ArbitrageTrader;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Load .env file first so RUST_LOG is available for logger initialization
+    dotenv::dotenv().ok();
+
     // Initialize logging
     init_logger().context("Failed to initialize logger")?;
     // Load configuration
@@ -82,7 +85,7 @@ async fn main() -> Result<()> {
     
     let mut cycle_count = 0;
     let mut initial_scan_logged = false;
-    let mut trade_executed = false;
+    let _trade_executed = false;
     let mut trades_completed = 0u32;
 
     // Main application loop - will exit after reaching max trades
@@ -91,7 +94,7 @@ async fn main() -> Result<()> {
         match run_arbitrage_cycle(&client, &mut balance_manager, &mut pair_manager, &mut arbitrage_engine, &mut trader, &precision_manager, cycle_count, &mut initial_scan_logged, &mut trades_completed, max_trades, min_trade_amount).await {
             Ok(should_exit) => {
                 if should_exit {
-                    info!("🎯 TRADE LIMIT REACHED ({}/{}) - Bot stopping as requested", trades_completed, max_trades);
+                    warn!("🎯 TRADE LIMIT REACHED ({}/{}) - Bot stopping as requested", trades_completed, max_trades);
                     break;
                 }
                 // Only log every 100 cycles to reduce spam
@@ -124,7 +127,7 @@ async fn run_arbitrage_cycle(
     pair_manager: &mut PairManager,
     arbitrage_engine: &mut ArbitrageEngine,
     trader: &mut ArbitrageTrader,
-    precision_manager: &PrecisionManager,
+    _precision_manager: &PrecisionManager,
     cycle_count: u64,
     initial_scan_logged: &mut bool,
     trades_completed: &mut u32,
@@ -217,23 +220,23 @@ async fn run_arbitrage_cycle(
         if *trades_completed < max_trades && best_opportunity.estimated_profit_pct > 0.01 { // More than 0.01% profit
             let usdt_balance = balance_manager.get_balance("USDT");
             if usdt_balance >= min_trade_amount {
-                info!("💰 EXECUTING TRADE #{}: Found profitable opportunity {:.2}% - executing!", 
+                warn!("💰 EXECUTING TRADE #{}: Found profitable opportunity {:.2}% - executing!", 
                       *trades_completed + 1, best_opportunity.estimated_profit_pct);
                 
                 match trader.execute_arbitrage(best_opportunity, min_trade_amount).await {
                     Ok(result) => {
                         if result.success {
                             *trades_completed += 1; // Only increment on successful trades
-                            info!("✅ TRADE #{} SUCCESS!", *trades_completed);
-                            info!("   Realized Profit: ${:.6} ({:.2}%)", result.actual_profit, result.actual_profit_pct);
+                            warn!("✅ TRADE #{} SUCCESS!", *trades_completed);
+                            warn!("   Realized Profit: ${:.6} ({:.2}%)", result.actual_profit, result.actual_profit_pct);
                             if result.dust_value_usd > 0.0 {
-                                info!("   Dust Value: ${:.6}", result.dust_value_usd);
+                                warn!("   Dust Value: ${:.6}", result.dust_value_usd);
                                 let total_profit = result.actual_profit + result.dust_value_usd;
                                 let total_pct = (total_profit / result.initial_amount) * 100.0;
-                                info!("   Total Profit (inc. Dust): ${:.6} ({:.2}%)", total_profit, total_pct);
+                                warn!("   Total Profit (inc. Dust): ${:.6} ({:.2}%)", total_profit, total_pct);
                             }
-                            info!("   Execution time: {}ms", result.execution_time_ms);
-                            info!("   Total fees: ${:.6}", result.total_fees);
+                            warn!("   Execution time: {}ms", result.execution_time_ms);
+                            warn!("   Total fees: ${:.6}", result.total_fees);
                             
                             // Force balance refresh after successful trade
                             balance_manager.force_refresh();
@@ -244,10 +247,10 @@ async fn run_arbitrage_cycle(
                             }
                             
                             if *trades_completed >= max_trades {
-                                info!("🏁 All {} trade(s) completed successfully - stopping bot", max_trades);
+                                warn!("🏁 All {} trade(s) completed successfully - stopping bot", max_trades);
                                 return Ok(true); // Signal to exit the main loop
                             } else {
-                                info!("⏳ Trade {}/{} completed, continuing to look for next opportunity...", 
+                                warn!("⏳ Trade {}/{} completed, continuing to look for next opportunity...", 
                                       *trades_completed, max_trades);
                             }
                         } else {

@@ -1,6 +1,6 @@
 use crate::client::BybitClient;
-use crate::models::{BalanceMap, CoinBalance};
-use anyhow::{Context, Result};
+use crate::models::BalanceMap;
+use anyhow::Result;
 use std::collections::HashMap;
 use tracing::{debug, info, warn};
 
@@ -88,40 +88,9 @@ impl BalanceManager {
         &self.balances
     }
 
-    /// Check if we have sufficient balance for trading
-    pub fn has_sufficient_balance(&self, coin: &str, required_amount: f64) -> bool {
-        self.get_balance(coin) >= required_amount
-    }
-
     /// Get the list of coins we have balances for
     pub fn get_available_coins(&self) -> Vec<String> {
         self.balances.keys().cloned().collect()
-    }
-
-    /// Calculate total USD value of all balances (requires USD prices)
-    pub fn calculate_total_usd_value(&self, coin_prices_usd: &HashMap<String, f64>) -> f64 {
-        self.balances
-            .iter()
-            .map(|(coin, balance)| {
-                let usd_price = if coin == "USDT" || coin == "USDC" {
-                    1.0
-                } else {
-                    coin_prices_usd.get(coin).copied().unwrap_or(0.0)
-                };
-                balance * usd_price
-            })
-            .sum()
-    }
-
-    /// Get minimum tradeable amount for arbitrage based on available balances
-    pub fn get_max_arbitrage_amount(&self, start_coin: &str, safety_factor: f64) -> f64 {
-        let balance = self.get_balance(start_coin);
-        balance * safety_factor // Use only a portion for safety
-    }
-
-    /// Check when balances were last updated
-    pub fn last_updated(&self) -> Option<chrono::DateTime<chrono::Utc>> {
-        self.last_updated
     }
 
     /// Check if balances need refresh (based on configured interval)
@@ -155,15 +124,6 @@ impl BalanceManager {
                 info!("  {} = {:.6}", coin, balance);
             }
         }
-    }
-
-    /// Log initial account scanning configuration (call once at startup)
-    pub fn log_initial_scanning_info(&self) {
-        let default_order_size = std::env::var("ORDER_SIZE")
-            .unwrap_or_else(|_| "50.0".to_string())
-            .parse::<f64>()
-            .unwrap_or(50.0);
-        self.log_initial_scanning_info_with_min_amount(default_order_size);
     }
 
     /// Log initial account scanning configuration with minimum trade amount filtering
@@ -246,25 +206,6 @@ impl BalanceManager {
             .filter(|(_, &balance)| balance >= min_threshold)
             .map(|(coin, &balance)| (coin.clone(), balance))
             .collect()
-    }
-
-    /// Parse coin balance from API response
-    fn parse_coin_balance(coin_balance: &CoinBalance) -> Option<(String, f64)> {
-        let coin = coin_balance.coin.clone();
-        let available_str = &coin_balance.available_to_withdraw;
-        
-        match available_str.parse::<f64>() {
-            Ok(balance) if balance > 0.0 => Some((coin, balance)),
-            Ok(_) => {
-                debug!("Zero balance for coin: {}", coin);
-                None
-            }
-            Err(e) => {
-                warn!("Failed to parse balance for {}: {} (value: '{}')", 
-                      coin, e, available_str);
-                None
-            }
-        }
     }
 
     /// Get balance summary statistics
@@ -359,19 +300,6 @@ mod tests {
         
         assert_eq!(manager.get_balance("BTC"), 1.5);
         assert_eq!(manager.get_balance("ETH"), 0.0);
-        assert!(manager.has_sufficient_balance("USDT", 500.0));
-        assert!(!manager.has_sufficient_balance("BTC", 2.0));
-    }
-
-    #[test]
-    fn test_parse_coin_balance() {
-        let coin_balance = create_test_coin_balance("BTC", "1.5");
-        let result = BalanceManager::parse_coin_balance(&coin_balance);
-        assert_eq!(result, Some(("BTC".to_string(), 1.5)));
-
-        let zero_balance = create_test_coin_balance("ETH", "0");
-        let result = BalanceManager::parse_coin_balance(&zero_balance);
-        assert_eq!(result, None);
     }
 
     #[test]

@@ -103,8 +103,6 @@ pub const MIN_VOLUME_24H_USD: f64 = 10000.0; // Minimum 24h volume in USD for li
 pub const MIN_BID_SIZE_USD: f64 = 100.0; // Minimum bid size in USD (lowered)
 pub const MIN_ASK_SIZE_USD: f64 = 100.0; // Minimum ask size in USD (lowered)
 pub const MAX_SPREAD_PERCENT: f64 = 1.0; // Maximum bid/ask spread percentage (decreased for tighter spreads)
-pub const MAX_SLIPPAGE_PERCENT: f64 = 0.5; // Maximum acceptable slippage per trade
-pub const VWAP_DEPTH_LEVELS: usize = 5; // Number of order book levels for VWAP calculation
 pub const MIN_TRADE_AMOUNT_USD: f64 = 10.0; // Minimum trade amount for realistic execution
 
 // Blacklisted tokens that should be excluded from arbitrage (geographical restrictions, etc.)

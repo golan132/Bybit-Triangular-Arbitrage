@@ -4,20 +4,15 @@ use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use serde::{Deserialize, Serialize};
-use tracing::{info, warn, debug, error};
+use tracing::{info, debug};
 
 #[derive(Debug, Clone)]
 pub struct PrecisionInfo {
-    pub symbol: String,
     pub base_coin: String,
     pub quote_coin: String,
     pub qty_precision: u32,
-    pub price_precision: u32,
     pub min_order_qty: f64,
     pub max_order_qty: f64,
-    pub qty_step: f64,
-    pub tick_size: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -81,7 +76,7 @@ impl PrecisionManager {
 
     /// Process instruments info and extract precision data
     fn process_instruments_info(&mut self, instruments: InstrumentsInfoResult) -> Result<()> {
-        let mut log_count = 0;
+        let _log_count = 0;
         for instrument in instruments.list {
             // Skip non-active instruments
             if instrument.status != "Trading" {
@@ -124,21 +119,17 @@ impl PrecisionManager {
                 .map(|s| s.parse::<f64>().unwrap_or(0.0))
                 .unwrap_or(0.0);
 
-            let tick_size = instrument.price_filter.as_ref()
+            let _tick_size = instrument.price_filter.as_ref()
                 .and_then(|f| f.tick_size.as_ref())
                 .map(|s| s.parse::<f64>().unwrap_or(0.0))
                 .unwrap_or(0.0);
 
             let precision_info = PrecisionInfo {
-                symbol: instrument.symbol.clone(),
                 base_coin: instrument.base_coin.clone(),
                 quote_coin: instrument.quote_coin.clone(),
                 qty_precision,
-                price_precision,
                 min_order_qty,
                 max_order_qty,
-                qty_step,
-                tick_size,
             };
 
             debug!("📊 {} precision: qty={} decimals, price={} decimals, step={:.8}", 
@@ -200,49 +191,6 @@ impl PrecisionManager {
         self.symbol_precision.get(symbol)
     }
 
-    /// Get quantity precision for a specific coin
-    pub fn get_coin_precision(&self, coin: &str) -> u32 {
-        self.coin_precision.get(coin).copied().unwrap_or_else(|| {
-            self.get_coin_precision_heuristic(coin)
-        })
-    }
-
-    /// Format quantity with appropriate precision for a symbol
-    pub fn format_quantity_for_symbol(&self, symbol: &str, quantity: f64) -> String {
-        if let Some(precision_info) = self.get_symbol_precision(symbol) {
-            // Use the symbol's specific quantity precision
-            format!("{:.prec$}", quantity, prec = precision_info.qty_precision as usize)
-        } else {
-            // Fallback to coin-based precision
-            let base_coin = self.extract_base_coin_from_symbol(symbol);
-            let precision = self.get_coin_precision(&base_coin);
-            format!("{:.prec$}", quantity, prec = precision as usize)
-        }
-    }
-
-    /// Format quantity with appropriate precision for a coin
-    pub fn format_quantity_for_coin(&self, coin: &str, quantity: f64) -> String {
-        let precision = self.get_coin_precision(coin);
-        format!("{:.prec$}", quantity, prec = precision as usize)
-    }
-
-    /// Extract base coin from symbol (rough estimation for fallback)
-    fn extract_base_coin_from_symbol(&self, symbol: &str) -> String {
-        // Try to match known patterns
-        if symbol.ends_with("USDT") {
-            symbol.trim_end_matches("USDT").to_string()
-        } else if symbol.ends_with("USDC") {
-            symbol.trim_end_matches("USDC").to_string()
-        } else if symbol.ends_with("BTC") {
-            symbol.trim_end_matches("BTC").to_string()
-        } else if symbol.ends_with("ETH") {
-            symbol.trim_end_matches("ETH").to_string()
-        } else {
-            // Return the first part if we can't determine
-            symbol.chars().take(3).collect()
-        }
-    }
-
     /// Validate if quantity meets minimum requirements for symbol
     pub fn validate_quantity(&self, symbol: &str, quantity: f64) -> Result<()> {
         if let Some(precision_info) = self.get_symbol_precision(symbol) {
@@ -284,11 +232,6 @@ impl PrecisionManager {
         }
         
         Ok(())
-    }
-
-    /// Get all loaded symbols
-    pub fn get_loaded_symbols(&self) -> Vec<String> {
-        self.symbol_precision.keys().cloned().collect()
     }
 
     /// Get all symbols with their precision info for building mappings

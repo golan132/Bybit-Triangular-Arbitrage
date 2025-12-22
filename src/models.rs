@@ -227,10 +227,14 @@ pub struct TickerInfo {
     pub delivery_fee_rate: Option<String>,
     #[serde(rename = "deliveryTime")]
     pub delivery_time: Option<String>,
-    pub ask1Size: String,
-    pub bid1Price: String,
-    pub ask1Price: String,
-    pub bid1Size: String,
+    #[serde(rename = "ask1Size")]
+    pub ask1_size: String,
+    #[serde(rename = "bid1Price")]
+    pub bid1_price: String,
+    #[serde(rename = "ask1Price")]
+    pub ask1_price: String,
+    #[serde(rename = "bid1Size")]
+    pub bid1_size: String,
     pub basis: Option<String>,
 }
 
@@ -345,10 +349,10 @@ impl MarketPair {
 
         // Parse prices from ticker
         let price = ticker.last_price.parse().ok()?;
-        let bid_price = ticker.bid1Price.parse().ok()?;
-        let ask_price = ticker.ask1Price.parse().ok()?;
-        let bid_size = ticker.bid1Size.parse().ok().unwrap_or(0.0);
-        let ask_size = ticker.ask1Size.parse().ok().unwrap_or(0.0);
+        let bid_price = ticker.bid1_price.parse().ok()?;
+        let ask_price = ticker.ask1_price.parse().ok()?;
+        let bid_size = ticker.bid1_size.parse().ok().unwrap_or(0.0);
+        let ask_size = ticker.ask1_size.parse().ok().unwrap_or(0.0);
         let volume_24h = ticker.volume24h.parse().ok().unwrap_or(0.0);
         let turnover_24h = ticker.turnover24h.parse().ok().unwrap_or(0.0);
 

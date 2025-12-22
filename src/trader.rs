@@ -1,5 +1,5 @@
 use crate::client::BybitClient;
-use crate::models::{PlaceOrderRequest, PlaceOrderResult, OrderInfo, ArbitrageOpportunity};
+use crate::models::{PlaceOrderRequest, OrderInfo, ArbitrageOpportunity};
 use crate::precision::PrecisionManager;
 use anyhow::{Result, Context};
 use tokio::time::{sleep, Duration};
@@ -9,12 +9,7 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct TradeExecution {
-    pub step: usize,
-    pub symbol: String,
     pub side: String,
-    pub quantity: String,
-    pub price: Option<String>,
-    pub order_id: String,
     pub executed_price: f64,
     pub executed_quantity: f64,
     pub executed_value: f64,
@@ -25,12 +20,9 @@ pub struct TradeExecution {
 pub struct ArbitrageExecutionResult {
     pub success: bool,
     pub initial_amount: f64,
-    pub final_amount: f64,
     pub actual_profit: f64,
     pub actual_profit_pct: f64,
     pub dust_value_usd: f64,
-    pub dust_assets: HashMap<String, f64>,
-    pub executions: Vec<TradeExecution>,
     pub total_fees: f64,
     pub execution_time_ms: u64,
     pub error_message: Option<String>,
@@ -106,7 +98,7 @@ impl ArbitrageTrader {
         info!("📊 Path: {} → {} → {} → {}", 
               opportunity.path[0], opportunity.path[1], opportunity.path[2], opportunity.path[3]);
 
-        let mut executions = Vec::new();
+        let mut executions: Vec<TradeExecution> = Vec::new();
         let mut current_amount = amount;
         let mut total_fees = 0.0;
         let mut dust_assets: HashMap<String, f64> = HashMap::new();
@@ -131,12 +123,9 @@ impl ArbitrageTrader {
                 return Ok(ArbitrageExecutionResult {
                     success: false,
                     initial_amount: amount,
-                    final_amount: current_amount,
                     actual_profit: current_amount - amount,
                     actual_profit_pct: ((current_amount - amount) / amount) * 100.0,
                     dust_value_usd,
-                    dust_assets,
-                    executions,
                     total_fees,
                     execution_time_ms: start_time.elapsed().as_millis() as u64,
                     error_message: Some("Execution timeout - market conditions may have changed".to_string()),
@@ -247,12 +236,9 @@ impl ArbitrageTrader {
                     return Ok(ArbitrageExecutionResult {
                         success: false,
                         initial_amount: amount,
-                        final_amount: current_amount,
                         actual_profit: current_amount - amount,
                         actual_profit_pct: ((current_amount - amount) / amount) * 100.0,
                         dust_value_usd,
-                        dust_assets,
-                        executions,
                         total_fees,
                         execution_time_ms: start_time.elapsed().as_millis() as u64,
                         error_message: Some(format!("{}: {}", error_category, error_str)),
@@ -267,25 +253,22 @@ impl ArbitrageTrader {
         let total_profit_with_dust = actual_profit + dust_value_usd;
         let total_profit_pct_with_dust = (total_profit_with_dust / amount) * 100.0;
 
-        info!("🎯 ARBITRAGE COMPLETED!");
-        info!("   Initial: ${:.6} → Final: ${:.6}", amount, current_amount);
-        info!("   Realized Profit: ${:.6} ({:.2}%)", actual_profit, actual_profit_pct);
+        warn!("🎯 ARBITRAGE COMPLETED!");
+        warn!("   Initial: ${:.6} → Final: ${:.6}", amount, current_amount);
+        warn!("   Realized Profit: ${:.6} ({:.2}%)", actual_profit, actual_profit_pct);
         if dust_value_usd > 0.0 {
-            info!("   Dust Value: ${:.6}", dust_value_usd);
-            info!("   Total Profit (inc. Dust): ${:.6} ({:.2}%)", total_profit_with_dust, total_profit_pct_with_dust);
+            warn!("   Dust Value: ${:.6}", dust_value_usd);
+            warn!("   Total Profit (inc. Dust): ${:.6} ({:.2}%)", total_profit_with_dust, total_profit_pct_with_dust);
         }
-        info!("   Total fees: ${:.6}", total_fees);
-        info!("   Execution time: {}ms", execution_time);
+        warn!("   Total fees: ${:.6}", total_fees);
+        warn!("   Execution time: {}ms", execution_time);
 
         Ok(ArbitrageExecutionResult {
             success: true,
             initial_amount: amount,
-            final_amount: current_amount,
             actual_profit,
             actual_profit_pct,
             dust_value_usd,
-            dust_assets,
-            executions,
             total_fees,
             execution_time_ms: execution_time,
             error_message: None,
@@ -367,12 +350,7 @@ impl ArbitrageTrader {
             .context("Failed to parse execution fee")?;
 
         Ok(TradeExecution {
-            step,
-            symbol: symbol.to_string(),
             side,
-            quantity: format!("{:.8}", executed_quantity), // Use executed quantity
-            price: Some(format!("{:.8}", executed_price)),
-            order_id: order_result.order_id,
             executed_price,
             executed_quantity,
             executed_value,
@@ -595,35 +573,6 @@ impl ArbitrageTrader {
         }
     }
 
-    /// Convert quote currency amount to base currency quantity for Buy orders
-    /// Example: Convert 25 USDC to equivalent NOT tokens based on current market price
-    async fn convert_quote_to_base_quantity(&self, symbol: &str, quote_amount: f64) -> Result<f64> {
-        // Get current market price
-        let market_price = self.get_estimated_market_price(symbol).await
-            .ok_or_else(|| anyhow::anyhow!("Failed to get market price for {}", symbol))?;
-        
-        // Calculate how many base tokens we can buy with the quote amount
-        let base_quantity = quote_amount / market_price;
-        
-        // Get precision info to validate against minimum order requirements
-        let precision_info = self.precision_manager.get_symbol_precision(symbol)
-            .ok_or_else(|| anyhow::anyhow!("Symbol {} not found in precision manager", symbol))?;
-        
-        // Check if calculated quantity meets minimum order requirements
-        if base_quantity < precision_info.min_order_qty {
-            return Err(anyhow::anyhow!(
-                "Calculated quantity {:.8} {} is below minimum {:.8} for symbol {} (spending {:.6} at price {:.8})",
-                base_quantity, precision_info.base_coin, precision_info.min_order_qty, symbol, quote_amount, market_price
-            ));
-        }
-        
-        info!("💱 Conversion: {:.6} {} ÷ {:.8} = {:.8} {} (min: {:.8})", 
-              quote_amount, precision_info.quote_coin, market_price, 
-              base_quantity, precision_info.base_coin, precision_info.min_order_qty);
-        
-        Ok(base_quantity)
-    }
-
     /// Get action for currency conversion using cached symbol mapping
     /// Returns (symbol, action) where action is "Sell" or "Buy"
     /// O(1) lookup using prebuilt HashMap - much faster than string concatenation + precision manager lookups
@@ -744,14 +693,11 @@ impl ArbitrageTrader {
         Ok(ArbitrageExecutionResult {
             success: true,
             initial_amount: amount,
-            final_amount: simulated_final,
             actual_profit,
             actual_profit_pct: (actual_profit / amount) * 100.0,
             dust_value_usd: 0.0,
-            dust_assets: HashMap::new(),
-            executions: Vec::new(), // Empty for simulation
             total_fees: simulated_fees,
-            execution_time_ms: 50, // Simulated execution time
+            execution_time_ms: 100,
             error_message: None,
         })
     }

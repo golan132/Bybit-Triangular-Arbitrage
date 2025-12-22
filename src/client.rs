@@ -20,7 +20,9 @@ impl BybitClient {
         let client = Client::builder()
             .timeout(std::time::Duration::from_secs(config.request_timeout_secs))
             .tcp_nodelay(true)
-            .pool_idle_timeout(std::time::Duration::from_secs(90))
+            .tcp_keepalive(std::time::Duration::from_secs(60)) // Keep connections alive
+            .pool_idle_timeout(None) // Never close idle connections automatically
+            .pool_max_idle_per_host(10) // Keep up to 10 connections open per host
             .default_headers(headers)
             .build()?;
 
@@ -28,7 +30,7 @@ impl BybitClient {
     }
 
     /// Generate HMAC SHA256 signature for Bybit API
-    fn generate_signature(&self, timestamp: u64, method: &str, path: &str, query_params: &str, body: &str) -> Result<String> {
+    fn generate_signature(&self, timestamp: u64, method: &str, _path: &str, query_params: &str, body: &str) -> Result<String> {
         use hmac::{Hmac, Mac};
         use sha2::Sha256;
 
@@ -87,31 +89,19 @@ impl BybitClient {
             .context("Failed to send request")?;
 
         let status = response.status();
-        let response_text = response
-            .text()
-            .await
-            .context("Failed to get response text")?;
-
-        debug!("Response status: {}, body: {}", status, response_text);
 
         if !status.is_success() {
+            let response_text = response.text().await.unwrap_or_default();
             error!("HTTP error {}: {}", status, response_text);
             return Err(anyhow::anyhow!("HTTP error {}: {}", status, response_text));
         }
 
-        // Parse as generic JSON first to check return code
-        let json_response: serde_json::Value = serde_json::from_str(&response_text)
-            .context("Failed to parse API response as JSON")?;
-            
-        let ret_code = json_response["retCode"].as_i64().unwrap_or(-1);
-        
-        if ret_code != 0 {
-            let ret_msg = json_response["retMsg"].as_str().unwrap_or("Unknown error");
-            return Err(anyhow::anyhow!("API Error {}: {}", ret_code, ret_msg));
-        }
+        // Optimization: Use simd-json for faster parsing and avoid double-parsing
+        // We need a mutable buffer for simd-json
+        let bytes = response.bytes().await.context("Failed to get response bytes")?;
+        let mut buffer = bytes.to_vec();
 
-        // If success, parse into the expected type
-        let api_response: ApiResponse<T> = serde_json::from_value(json_response)
+        let api_response: ApiResponse<T> = simd_json::from_slice(&mut buffer)
             .context("Failed to parse API response structure")?;
 
         api_response.into_result()
@@ -139,32 +129,18 @@ impl BybitClient {
             .context("Failed to send request")?;
 
         let status = response.status();
-        let response_text = response
-            .text()
-            .await
-            .context("Failed to get response text")?;
-
-        debug!("Response status: {}, body preview: {}...", status, 
-               response_text.chars().take(200).collect::<String>());
-
+        
         if !status.is_success() {
+            let response_text = response.text().await.unwrap_or_default();
             error!("HTTP error {}: {}", status, response_text);
             return Err(anyhow::anyhow!("HTTP error {}: {}", status, response_text));
         }
 
-        // Parse as generic JSON first to check return code
-        let json_response: serde_json::Value = serde_json::from_str(&response_text)
-            .context("Failed to parse API response as JSON")?;
-            
-        let ret_code = json_response["retCode"].as_i64().unwrap_or(-1);
-        
-        if ret_code != 0 {
-            let ret_msg = json_response["retMsg"].as_str().unwrap_or("Unknown error");
-            return Err(anyhow::anyhow!("API Error {}: {}", ret_code, ret_msg));
-        }
+        // Optimization: Use simd-json
+        let bytes = response.bytes().await.context("Failed to get response bytes")?;
+        let mut buffer = bytes.to_vec();
 
-        // If success, parse into the expected type
-        let api_response: ApiResponse<T> = serde_json::from_value(json_response)
+        let api_response: ApiResponse<T> = simd_json::from_slice(&mut buffer)
             .context("Failed to parse API response structure")?;
 
         api_response.into_result()
@@ -348,45 +324,7 @@ impl BybitClient {
         }
     }
 
-    /// Cancel an order
-    pub async fn cancel_order(&self, category: &str, symbol: &str, order_id: &str) -> Result<()> {
-        info!("Cancelling order: {}", order_id);
-        
-        let endpoint = format!("{}/v5/order/cancel", self.config.base_url);
-        let body = serde_json::json!({
-            "category": category,
-            "symbol": symbol,
-            "orderId": order_id
-        }).to_string();
-        
-        let timestamp = Self::get_timestamp_ms();
-        
-        let client = reqwest::Client::new();
-        let signature = self.generate_signature(timestamp, "POST", "/v5/order/cancel", "", &body)?;
-        
-        let response = client
-            .post(&endpoint)
-            .header("X-BAPI-API-KEY", &self.config.api_key)
-            .header("X-BAPI-SIGN", signature)
-            .header("X-BAPI-SIGN-TYPE", "2")
-            .header("X-BAPI-TIMESTAMP", timestamp.to_string())
-            .header("X-BAPI-RECV-WINDOW", "5000")
-            .header("Content-Type", "application/json")
-            .body(body)
-            .send()
-            .await?;
 
-        let response_text = response.text().await?;
-        let api_response: crate::models::ApiResponse<serde_json::Value> = 
-            serde_json::from_str(&response_text)?;
-
-        if !api_response.is_success() {
-            return Err(anyhow::anyhow!("API Error: {}", api_response.ret_msg));
-        }
-
-        info!("Order cancelled successfully: {}", order_id);
-        Ok(())
-    }
 }
 
 #[cfg(test)]

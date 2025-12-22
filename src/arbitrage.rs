@@ -3,34 +3,9 @@ use crate::config::{MIN_PROFIT_THRESHOLD, MAX_TRIANGLES_TO_SCAN};
 use crate::models::ArbitrageOpportunity;
 use crate::pairs::{PairManager, TrianglePairs};
 use chrono::Utc;
-use tracing::{debug, info, warn};
+use tracing::debug;
 use rayon::prelude::*;
 
-#[derive(Debug, Clone)]
-pub enum TradeDirection {
-    Buy,
-    Sell,
-}
-
-#[derive(Debug, Clone)]
-pub struct TradeStep {
-    pub pair_symbol: String,
-    pub direction: TradeDirection,
-    pub input_amount: f64,
-    pub output_amount: f64,
-    pub execution_price: f64,
-    pub ideal_price: f64,
-    pub slippage_percent: f64,
-    pub available_size: f64,
-}
-
-#[derive(Debug, Clone)]
-pub struct ExecutionResult {
-    pub initial_amount: f64,
-    pub final_amount: f64,
-    pub steps: Vec<TradeStep>,
-    pub total_slippage: f64,
-}
 
 pub struct ArbitrageEngine {
     opportunities: Vec<ArbitrageOpportunity>,
@@ -56,19 +31,6 @@ impl ArbitrageEngine {
             max_scan_count,
             trading_fee_rate: fee_rate,
         }
-    }
-
-    /// Scan for triangular arbitrage opportunities
-    pub fn scan_opportunities(
-        &mut self,
-        pair_manager: &PairManager,
-        balance_manager: &BalanceManager,
-    ) -> Vec<ArbitrageOpportunity> {
-        let default_order_size = std::env::var("ORDER_SIZE")
-            .unwrap_or_else(|_| "50.0".to_string())
-            .parse::<f64>()
-            .unwrap_or(50.0);
-        self.scan_opportunities_with_min_amount(pair_manager, balance_manager, default_order_size)
     }
 
     /// Scan for triangular arbitrage opportunities with minimum trade amount filtering
@@ -221,9 +183,7 @@ impl ArbitrageEngine {
     ) -> Option<ArbitrageOpportunity> {
         let path = &triangle.path;
         let pairs = [&triangle.pair1, &triangle.pair2, &triangle.pair3];
-        let mut prices = Vec::new();
-        let mut pair_symbols = Vec::new();
-        let mut trade_details = Vec::new();
+        let mut prices = Vec::with_capacity(3);
 
         // Use a reasonable test amount (10% of balance or $100 equivalent)
         let test_amount = (initial_amount * 0.1).min(100.0).max(1.0);
@@ -232,12 +192,9 @@ impl ArbitrageEngine {
         // Simulate the trades through the triangle using realistic bid/ask prices
         for (i, pair) in pairs.iter().enumerate() {
             let from_currency = &path[i];
-            let to_currency = &path[i + 1];
             
-            pair_symbols.push(pair.symbol.clone());
-
             // Determine if we're buying or selling and use appropriate price
-            let (amount_after_trade, effective_price, is_sell) = if pair.base == *from_currency {
+            let (amount_after_trade, _effective_price) = if pair.base == *from_currency {
                 // Selling base for quote (from_currency/to_currency)
                 // When selling, we get the bid price (what market makers will pay us)
                 if pair.bid_price <= 0.0 {
@@ -245,7 +202,7 @@ impl ArbitrageEngine {
                 }
                 let received = current_amount * pair.bid_price;
                 prices.push(pair.bid_price);
-                (received, pair.bid_price, true)
+                (received, pair.bid_price)
             } else {
                 // Buying base with quote (to_currency/from_currency)  
                 // When buying, we pay the ask price (what market makers will sell for)
@@ -254,34 +211,11 @@ impl ArbitrageEngine {
                 }
                 let received = current_amount / pair.ask_price;
                 prices.push(pair.ask_price);
-                (received, pair.ask_price, false)
+                (received, pair.ask_price)
             };
-
-            // Store trade details for logging
-            trade_details.push(crate::logger::TradeDetail {
-                pair_symbol: pair.symbol.clone(),
-                from_currency: from_currency.clone(),
-                to_currency: to_currency.clone(),
-                amount_in: current_amount,
-                amount_out: amount_after_trade * (1.0 - self.trading_fee_rate),
-                price: effective_price,
-                bid_price: pair.bid_price,
-                ask_price: pair.ask_price,
-                is_sell,
-            });
 
             // Apply trading fee (typically 0.1% for Bybit)
             current_amount = amount_after_trade * (1.0 - self.trading_fee_rate);
-            
-            debug!("Step {}: {} {} -> {} {} (price: {:.8}, type: {}, after fee: {:.6})",
-                   i + 1, 
-                   current_amount / (1.0 - self.trading_fee_rate), 
-                   from_currency,
-                   current_amount, 
-                   to_currency, 
-                   effective_price,
-                   if is_sell { "SELL@BID" } else { "BUY@ASK" },
-                   current_amount);
         }
 
         // Calculate profit with additional slippage buffer
@@ -310,6 +244,13 @@ impl ArbitrageEngine {
             }
 
             // Only return reasonable profit calculations
+            // Optimization: Only clone strings if we are actually returning an opportunity
+            let pair_symbols = vec![
+                triangle.pair1.symbol.clone(),
+                triangle.pair2.symbol.clone(),
+                triangle.pair3.symbol.clone(),
+            ];
+
             let opportunity = ArbitrageOpportunity {
                 path: path.clone(),
                 pairs: pair_symbols,
@@ -326,89 +267,12 @@ impl ArbitrageEngine {
         }
     }
 
-    /// Get current opportunities
-    pub fn get_opportunities(&self) -> &[ArbitrageOpportunity] {
-        &self.opportunities
-    }
-
     /// Get opportunities above a certain profit threshold
     pub fn get_profitable_opportunities(&self, min_profit_pct: f64) -> Vec<&ArbitrageOpportunity> {
         self.opportunities
             .iter()
             .filter(|opp| opp.estimated_profit_pct >= min_profit_pct)
             .collect()
-    }
-
-    /// Log top opportunities for debugging
-    fn log_top_opportunities(&self) {
-        if self.opportunities.is_empty() {
-            info!("📉 No profitable arbitrage opportunities found");
-            return;
-        }
-
-        info!("🚀 Top arbitrage opportunities:");
-        for (i, opportunity) in self.opportunities.iter().take(5).enumerate() {
-            info!(
-                "  {}. {} | Est. Profit: {:+.2}% (${:.2})",
-                i + 1,
-                opportunity.display_path(),
-                opportunity.estimated_profit_pct,
-                opportunity.estimated_profit_usd
-            );
-            debug!("     Pairs: {}", opportunity.display_pairs());
-            debug!("     Prices: {:?}", opportunity.prices);
-        }
-    }
-
-    /// Calculate theoretical maximum profit for a triangle
-    pub fn calculate_max_theoretical_profit(
-        &self,
-        triangle: &TrianglePairs,
-        max_amount: f64,
-    ) -> Option<f64> {
-        // This would calculate the maximum possible profit considering:
-        // - Order book depth
-        // - Slippage
-        // - Maximum trade sizes
-        // For now, return a conservative estimate
-        
-        let base_profit_rate = self.calculate_base_profit_rate(triangle)?;
-        if base_profit_rate <= 0.0 {
-            return None;
-        }
-
-        // Conservative estimate considering slippage increases with trade size
-        let slippage_factor = 1.0 - (max_amount / 10000.0).min(0.05); // Max 5% slippage
-        Some(max_amount * base_profit_rate * slippage_factor)
-    }
-
-    /// Calculate base profit rate without considering trade size
-    fn calculate_base_profit_rate(&self, triangle: &TrianglePairs) -> Option<f64> {
-        let p1 = triangle.pair1.price;
-        let p2 = triangle.pair2.price;
-        let p3 = triangle.pair3.price;
-
-        // Simplified calculation - in practice, this depends on the direction of trades
-        let theoretical_rate = (1.0 / p1) * p2 * (1.0 / p3) - 1.0;
-        let after_fees = theoretical_rate - (self.trading_fee_rate * 3.0); // 3 trades
-
-        if after_fees > 0.0 && after_fees.is_finite() {
-            Some(after_fees)
-        } else {
-            None
-        }
-    }
-
-    /// Update trading fee rate
-    pub fn set_trading_fee_rate(&mut self, fee_rate: f64) {
-        self.trading_fee_rate = fee_rate;
-        info!("Updated trading fee rate to {:.3}%", fee_rate * 100.0);
-    }
-
-    /// Update profit threshold
-    pub fn set_profit_threshold(&mut self, threshold: f64) {
-        self.profit_threshold = threshold;
-        info!("Updated profit threshold to {:.2}%", threshold);
     }
 
     /// Get arbitrage statistics
@@ -448,11 +312,6 @@ impl ArbitrageEngine {
             total_estimated_usd_profit: total_estimated_usd,
             last_scan: Some(Utc::now()),
         }
-    }
-
-    /// Clear old opportunities
-    pub fn clear_opportunities(&mut self) {
-        self.opportunities.clear();
     }
 }
 
@@ -558,23 +417,6 @@ mod tests {
         assert_eq!(engine.profit_threshold, 0.5);
         assert_eq!(engine.max_scan_count, 100);
         assert_eq!(engine.trading_fee_rate, 0.002);
-    }
-
-    #[test]
-    fn test_calculate_base_profit_rate() {
-        let engine = ArbitrageEngine::new();
-        let triangle = create_test_triangle();
-        
-        let profit_rate = engine.calculate_base_profit_rate(&triangle);
-        
-        // The profit rate might be None if no arbitrage opportunity exists
-        // This is normal and expected in most cases
-        if let Some(rate) = profit_rate {
-            println!("Calculated base profit rate: {:.6}", rate);
-            assert!(rate.is_finite());
-        } else {
-            println!("No arbitrage opportunity found (expected)");
-        }
     }
 
     #[test]

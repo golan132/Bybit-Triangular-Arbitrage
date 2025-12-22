@@ -77,56 +77,6 @@ pub fn log_arbitrage_opportunity(
 }
 
 /// Log detailed arbitrage opportunity with bid/ask prices for manual verification
-pub fn log_detailed_arbitrage_opportunity(
-    opportunity: &crate::models::ArbitrageOpportunity,
-    trade_details: &[TradeDetail],
-    rank: usize,
-) {
-    info!(
-        "[OPPORTUNITY #{}] {} | Est. Profit: {:+.2}% (${:.2})",
-        rank,
-        opportunity.display_path(),
-        opportunity.estimated_profit_pct,
-        opportunity.estimated_profit_usd
-    );
-    
-    // Log each trade step with detailed pricing
-    for (i, detail) in trade_details.iter().enumerate() {
-        info!(
-            "  Step {}: {} {:.6} {} → {:.6} {} @ {:.8} ({})", 
-            i + 1,
-            if detail.is_sell { "SELL" } else { "BUY" },
-            detail.amount_in,
-            detail.from_currency,
-            detail.amount_out,
-            detail.to_currency,
-            detail.price,
-            detail.pair_symbol
-        );
-        info!(
-            "    📊 {}: Bid {:.8} | Ask {:.8} | Used: {:.8} | Spread: {:.4}%",
-            detail.pair_symbol,
-            detail.bid_price,
-            detail.ask_price,
-            detail.price,
-            ((detail.ask_price - detail.bid_price) / detail.bid_price) * 100.0
-        );
-    }
-}
-
-#[derive(Debug)]
-pub struct TradeDetail {
-    pub pair_symbol: String,
-    pub from_currency: String,
-    pub to_currency: String,
-    pub amount_in: f64,
-    pub amount_out: f64,
-    pub price: f64,
-    pub bid_price: f64,
-    pub ask_price: f64,
-    pub is_sell: bool,
-}
-
 /// Log balance information in a formatted way
 pub fn log_balance_summary(summary: &crate::balance::BalanceSummary) {
     info!("💰 {}", summary.display());
@@ -188,16 +138,6 @@ pub fn log_success(operation: &str, details: &str) {
     info!("✅ {}: {}", operation, details);
 }
 
-/// Log rate limiting or API issues
-pub fn log_api_issue(endpoint: &str, status_code: Option<u16>, message: &str) {
-    match status_code {
-        Some(429) => warn!("🚫 Rate limited on {}: {}", endpoint, message),
-        Some(code) if code >= 500 => error!("🔥 Server error on {} ({}): {}", endpoint, code, message),
-        Some(code) if code >= 400 => warn!("⚠️ Client error on {} ({}): {}", endpoint, code, message),
-        _ => warn!("🌐 API issue on {}: {}", endpoint, message),
-    }
-}
-
 /// Log performance metrics
 pub fn log_performance_metrics(
     operation: &str,
@@ -219,84 +159,7 @@ pub fn log_performance_metrics(
     debug!("⚡ {}: {}", operation, performance_msg);
 }
 
-/// Log trading simulation results
-pub fn log_simulation_result(
-    initial_amount: f64,
-    final_amount: f64,
-    currency: &str,
-    steps: &[String],
-) {
-    let profit = final_amount - initial_amount;
-    let profit_pct = (profit / initial_amount) * 100.0;
-    
-    if profit > 0.0 {
-        info!("💹 Simulation: {:.6} {} → {:.6} {} ({:+.2}%)", 
-              initial_amount, currency, final_amount, currency, profit_pct);
-    } else {
-        warn!("📉 Simulation: {:.6} {} → {:.6} {} ({:+.2}%)", 
-              initial_amount, currency, final_amount, currency, profit_pct);
-    }
-    
-    debug!("  Steps: {}", steps.join(" → "));
-}
-
-/// Log system resource usage (if available)
-pub fn log_system_stats() {
-    // This could be extended to log memory usage, CPU usage, etc.
-    debug!("💻 System stats logging not yet implemented");
-}
-
-/// Create a progress indicator for long-running operations
-pub struct ProgressLogger {
-    operation: String,
-    total: usize,
-    current: usize,
-    last_percent: usize,
-}
-
-impl ProgressLogger {
-    pub fn new(operation: &str, total: usize) -> Self {
-        info!("🔄 Starting {}: 0/{} (0%)", operation, total);
-        
-        Self {
-            operation: operation.to_string(),
-            total,
-            current: 0,
-            last_percent: 0,
-        }
-    }
-    
-    pub fn update(&mut self, current: usize) {
-        self.current = current;
-        let percent = if self.total > 0 {
-            (current * 100) / self.total
-        } else {
-            100
-        };
-        
-        // Only log every 10% to avoid spam
-        if percent >= self.last_percent + 10 || current == self.total {
-            info!("🔄 {}: {}/{} ({}%)", self.operation, current, self.total, percent);
-            self.last_percent = percent;
-        }
-    }
-    
-    pub fn finish(&self) {
-        info!("✅ Completed {}: {}/{} (100%)", self.operation, self.total, self.total);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_progress_logger() {
-        let mut progress = ProgressLogger::new("Test Operation", 100);
-        progress.update(25);
-        progress.update(50);
-        progress.update(75);
-        progress.update(100);
-        progress.finish();
-    }
 }
