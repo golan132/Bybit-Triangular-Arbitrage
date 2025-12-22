@@ -111,6 +111,16 @@ impl ArbitrageTrader {
         let mut total_fees = 0.0;
         let mut dust_assets: HashMap<String, f64> = HashMap::new();
         let mut dust_value_usd = 0.0;
+        
+        // Track confirmed balance to avoid redundant API calls
+        let mut confirmed_balance: Option<f64> = None;
+        
+        // Pre-fetch balance for Step 1 if not dry run
+        if !self.dry_run {
+             if let Ok(bal) = self.get_actual_balance(&opportunity.path[0]).await {
+                 confirmed_balance = Some(bal);
+             }
+        }
 
         // Execute each step of the arbitrage
         for (step, pair_symbol) in opportunity.pairs.iter().enumerate() {
@@ -135,13 +145,14 @@ impl ArbitrageTrader {
             
             // For steps 2 and 3, verify we have the balance from the previous step
             if step > 0 {
-                self.wait_for_balance_settlement(step + 1, opportunity).await?;
+                let bal = self.wait_for_balance_settlement(step + 1, opportunity).await?;
+                confirmed_balance = Some(bal);
             }
             
             // Use the actual amount we have from the previous step
             let trade_amount = current_amount;
             
-            match self.execute_trade_step(step + 1, pair_symbol, trade_amount, &opportunity).await {
+            match self.execute_trade_step(step + 1, pair_symbol, trade_amount, confirmed_balance, &opportunity).await {
                 Ok(execution) => {
                     // Calculate dust (unused balance)
                     let used_amount = if execution.side == "Buy" {
@@ -282,11 +293,11 @@ impl ArbitrageTrader {
     }
 
     /// Wait for balance to be settled after previous trade
-    async fn wait_for_balance_settlement(&self, step: usize, opportunity: &ArbitrageOpportunity) -> Result<()> {
+    async fn wait_for_balance_settlement(&self, step: usize, opportunity: &ArbitrageOpportunity) -> Result<f64> {
         let required_currency = match step {
             2 => &opportunity.path[1], // Step 2 needs currency from step 1 (USDC)
             3 => &opportunity.path[2], // Step 3 needs currency from step 2 (ENS)
-            _ => return Ok(()), // Step 1 doesn't need previous balance
+            _ => return Ok(0.0), // Step 1 doesn't need previous balance
         };
 
         let start_time = std::time::Instant::now();
@@ -295,7 +306,7 @@ impl ArbitrageTrader {
         loop {
             if start_time.elapsed() > max_wait {
                 warn!("⚠️ Balance settlement timeout for {} - proceeding anyway", required_currency);
-                return Ok(()); // Continue anyway, let the order fail if needed
+                return Ok(0.0); // Continue anyway, let the order fail if needed
             }
 
             // Check if we have any balance of the required currency
@@ -307,14 +318,14 @@ impl ArbitrageTrader {
                             
                             if available_balance > 0.0 {
                                 debug!("✅ Balance settled: {} {} available", available_balance, required_currency);
-                                return Ok(());
+                                return Ok(available_balance);
                             }
                         }
                     }
                 }
                 Err(_) => {
                     // If balance check fails, just continue
-                    return Ok(());
+                    // return Ok(()); // Old
                 }
             }
 
@@ -328,15 +339,16 @@ impl ArbitrageTrader {
         step: usize, 
         symbol: &str, 
         amount: f64, 
+        confirmed_balance: Option<f64>,
         opportunity: &ArbitrageOpportunity
     ) -> Result<TradeExecution> {
         info!("📈 Step {}: Executing trade on {}", step, symbol);
 
         // Determine trade direction and calculate quantity
-        let (side, quantity) = self.calculate_trade_parameters(step, symbol, amount, opportunity).await?;
+        let (side, quantity) = self.calculate_trade_parameters(step, symbol, amount, opportunity, confirmed_balance).await?;
 
         // Verify we have sufficient balance before placing the order
-        self.verify_balance_for_trade(step, &side, symbol, quantity, opportunity).await?;
+        self.verify_balance_for_trade(step, &side, symbol, quantity, opportunity, confirmed_balance).await?;
 
         // Use precision manager to format quantity with automatic retry logic
         let order_result = self.place_order_with_precision_retry(symbol, &side, quantity, step).await?;
@@ -376,6 +388,7 @@ impl ArbitrageTrader {
         symbol: &str,
         quantity: f64,
         opportunity: &ArbitrageOpportunity,
+        confirmed_balance: Option<f64>,
     ) -> Result<()> {
         // Determine which currency we need to have balance for
         let required_currency = match (step, side) {
@@ -388,45 +401,48 @@ impl ArbitrageTrader {
             _ => return Err(anyhow::anyhow!("Invalid step/side combination: {}/{}", step, side)),
         };
 
-        // Check current balance
-        match self.client.get_wallet_balance(Some("UNIFIED")).await {
-            Ok(balance_result) => {
-                if let Some(account) = balance_result.list.first() {
-                    if let Some(coin_balance) = account.coin.iter().find(|c| &c.coin == required_currency) {
-                        let available_balance: f64 = coin_balance.wallet_balance.parse()
-                            .unwrap_or(0.0);
-                        
-                        // Calculate required amount based on order type
-                        let required_amount = if side == "Sell" {
-                            // For sell orders, we need the exact quantity of the asset
-                            quantity
+        // Use confirmed balance if available, otherwise fetch
+        let available_balance = if let Some(balance) = confirmed_balance {
+            balance
+        } else {
+            // Check current balance
+            match self.client.get_wallet_balance(Some("UNIFIED")).await {
+                Ok(balance_result) => {
+                    if let Some(account) = balance_result.list.first() {
+                        if let Some(coin_balance) = account.coin.iter().find(|c| &c.coin == required_currency) {
+                            coin_balance.wallet_balance.parse().unwrap_or(0.0)
                         } else {
-                            // For buy orders, quantity is already the quote currency amount to spend
-                            quantity
-                        };
-                        
-                        if available_balance >= required_amount {
-                            info!("✅ Balance check passed: {} {} available (need {:.6})", 
-                                  available_balance, required_currency, required_amount);
-                            return Ok(());
-                        } else {
-                            return Err(anyhow::anyhow!(
-                                "Insufficient {} balance: have {:.6}, need {:.6} for step {} {} on {}", 
-                                required_currency, available_balance, required_amount, step, side, symbol
-                            ));
+                            0.0
                         }
+                    } else {
+                        0.0
                     }
+                },
+                Err(e) => {
+                    warn!("Failed to check balance (continuing anyway): {}", e);
+                    0.0
                 }
-                
-                return Err(anyhow::anyhow!(
-                    "Could not find {} balance in wallet", required_currency
-                ));
-            },
-            Err(e) => {
-                warn!("Failed to check balance (continuing anyway): {}", e);
-                // Continue without balance check if API fails
-                return Ok(());
             }
+        };
+
+        // Calculate required amount based on order type
+        let required_amount = if side == "Sell" {
+            // For sell orders, we need the exact quantity of the asset
+            quantity
+        } else {
+            // For buy orders, quantity is already the quote currency amount to spend
+            quantity
+        };
+        
+        if available_balance >= required_amount {
+            info!("✅ Balance check passed: {} {} available (need {:.6})", 
+                  available_balance, required_currency, required_amount);
+            return Ok(());
+        } else {
+            return Err(anyhow::anyhow!(
+                "Insufficient {} balance: have {:.6}, need {:.6} for step {} {} on {}", 
+                required_currency, available_balance, required_amount, step, side, symbol
+            ));
         }
     }
 
@@ -437,6 +453,7 @@ impl ArbitrageTrader {
         symbol: &str,
         amount: f64,
         opportunity: &ArbitrageOpportunity,
+        confirmed_balance: Option<f64>,
     ) -> Result<(String, f64)> {
         info!("🔍 Calculating trade parameters for Step {}: {} with amount {:.6}", step, symbol, amount);
         
@@ -466,7 +483,12 @@ impl ArbitrageTrader {
                 info!("Step 2: Converting {} to {} via {}", from, to, symbol);
                 
                 // Use actual available balance with a more conservative buffer
-                let actual_balance = self.get_actual_balance(from).await?;
+                let actual_balance = if let Some(bal) = confirmed_balance {
+                    bal
+                } else {
+                    self.get_actual_balance(from).await?
+                };
+
                 let safe_quantity = (actual_balance * 0.99).min(amount); // Use 99% of available (more conservative)
                 
                 info!("💰 Available {} balance: {:.8}, using: {:.8}", from, actual_balance, safe_quantity);
@@ -481,7 +503,12 @@ impl ArbitrageTrader {
                 info!("Step 3: Converting {} to {} via {}", from, to, symbol);
                 
                 // Use actual available balance
-                let actual_balance = self.get_actual_balance(from).await?;
+                let actual_balance = if let Some(bal) = confirmed_balance {
+                    bal
+                } else {
+                    self.get_actual_balance(from).await?
+                };
+
                 let safe_quantity = actual_balance * 0.99; // Use 99% of available (more conservative)
                 
                 info!("💰 Available {} balance: {:.8}, using: {:.8} for next step", from, actual_balance, safe_quantity);
