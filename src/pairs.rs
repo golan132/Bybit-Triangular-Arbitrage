@@ -94,6 +94,68 @@ impl PairManager {
         Ok(())
     }
 
+    /// Update only prices from tickers (lighter update, much faster)
+    pub async fn update_prices(&mut self, client: &BybitClient) -> Result<()> {
+        // Fetch tickers for prices
+        let tickers_result = client
+            .get_tickers("spot")
+            .await
+            .context("Failed to fetch tickers")?;
+
+        // Update prices in map and pairs
+        for ticker in &tickers_result.list {
+            if let Ok(price) = ticker.last_price.parse::<f64>() {
+                self.price_map.insert(ticker.symbol.clone(), price);
+                
+                if let Some(&idx) = self.symbol_to_pair.get(&ticker.symbol) {
+                    if let Some(pair) = self.pairs.get_mut(idx) {
+                        pair.price = price;
+                        
+                        // Also update bid/ask if available
+                        if let (Ok(bid), Ok(ask)) = (ticker.bid1Price.parse::<f64>(), ticker.ask1Price.parse::<f64>()) {
+                            // Only update if prices are valid and positive
+                            if bid > 0.0 && ask > 0.0 {
+                                pair.bid_price = bid;
+                                pair.ask_price = ask;
+                                
+                                // Re-calculate spread
+                                pair.spread_percent = ((ask - bid) / bid) * 100.0;
+                            }
+                        }
+                        
+                        // Update volume if available
+                        if let Ok(vol) = ticker.volume24h.parse::<f64>() {
+                            pair.volume_24h = vol;
+                        }
+
+                        // Update liquidity status
+                        // Estimate 24h volume in USD
+                        let volume_24h_usd = if let Ok(turnover) = ticker.turnover24h.parse::<f64>() {
+                            turnover
+                        } else {
+                            pair.volume_24h * pair.price
+                        };
+                        pair.volume_24h_usd = volume_24h_usd;
+
+                        // Re-evaluate liquidity
+                        let bid_size = ticker.bid1Size.parse().unwrap_or(0.0);
+                        let ask_size = ticker.ask1Size.parse().unwrap_or(0.0);
+                        pair.bid_size = bid_size;
+                        pair.ask_size = ask_size;
+
+                        pair.is_liquid = volume_24h_usd >= crate::config::MIN_VOLUME_24H_USD
+                            && pair.spread_percent <= crate::config::MAX_SPREAD_PERCENT
+                            && bid_size * pair.bid_price >= crate::config::MIN_BID_SIZE_USD
+                            && ask_size * pair.ask_price >= crate::config::MIN_ASK_SIZE_USD;
+                    }
+                }
+            }
+        }
+        
+        self.last_updated = Some(chrono::Utc::now());
+        Ok(())
+    }
+
     /// Get all market pairs
     pub fn get_pairs(&self) -> &[MarketPair] {
         &self.pairs

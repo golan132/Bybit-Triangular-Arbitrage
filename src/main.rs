@@ -107,7 +107,7 @@ async fn main() -> Result<()> {
 
         // Run continuously without delay for live arbitrage scanning
         // Add a small delay to prevent overwhelming the API
-        sleep(Duration::from_millis(100)).await;
+        sleep(Duration::from_millis(500)).await;
     }
     
     // Save precision cache on exit
@@ -168,26 +168,36 @@ async fn run_arbitrage_cycle(
     }
 
     // Phase 2: Update trading pairs and prices
-    if pair_manager.needs_refresh(config::PRICE_REFRESH_INTERVAL_SECS) {
-        if cycle_count % 10 == 0 {
-            log_phase("pairs", "Refreshing trading pairs and prices");
-        }
+    // Full refresh (instruments + prices) every 2000 cycles or if empty
+    let needs_full_refresh = pair_manager.get_pairs().is_empty() || cycle_count % 2000 == 0;
+    
+    if needs_full_refresh {
+        log_phase("pairs", "Performing FULL refresh of trading pairs and prices (Instruments + Tickers)");
         let pairs_start = Instant::now();
         
         pair_manager
             .update_pairs_and_prices(client)
             .await
             .context("Failed to update pairs and prices")?;
-        
-        if cycle_count % 10 == 0 {
-            log_performance_metrics(
-                "Pairs & prices fetch",
-                pairs_start.elapsed().as_millis() as u64,
-                Some(pair_manager.get_pairs().len()),
-            );
             
-            log_pair_statistics(&pair_manager.get_statistics());
+        log_performance_metrics(
+            "Full pairs refresh",
+            pairs_start.elapsed().as_millis() as u64,
+            Some(pair_manager.get_pairs().len()),
+        );
+        
+        log_pair_statistics(&pair_manager.get_statistics());
+    } 
+    // Light refresh (prices only) based on timer
+    else if pair_manager.needs_refresh(config::PRICE_REFRESH_INTERVAL_SECS) {
+        if cycle_count % 50 == 0 {
+            log_phase("pairs", "Refreshing prices (Tickers only)");
         }
+        
+        pair_manager
+            .update_prices(client)
+            .await
+            .context("Failed to update prices")?;
     }
 
     // Phase 3: Scan for arbitrage opportunities
@@ -197,7 +207,10 @@ async fn run_arbitrage_cycle(
     
     // Execute profitable opportunities (only the most profitable one per cycle)
     if let Some(best_opportunity) = opportunities.first() {
-        log_arbitrage_opportunity(best_opportunity, 1);
+        // Only log periodically to avoid spam, even for profitable ones (since we log execution separately)
+        if cycle_count % 10 == 0 {
+            log_arbitrage_opportunity(best_opportunity, 1);
+        }
         
         // Execute the trade if profit is above threshold and we have sufficient balance
         // AND we haven't reached the maximum number of trades yet
@@ -212,7 +225,13 @@ async fn run_arbitrage_cycle(
                         if result.success {
                             *trades_completed += 1; // Only increment on successful trades
                             info!("✅ TRADE #{} SUCCESS!", *trades_completed);
-                            info!("   Profit: ${:.6} ({:.2}%)", result.actual_profit, result.actual_profit_pct);
+                            info!("   Realized Profit: ${:.6} ({:.2}%)", result.actual_profit, result.actual_profit_pct);
+                            if result.dust_value_usd > 0.0 {
+                                info!("   Dust Value: ${:.6}", result.dust_value_usd);
+                                let total_profit = result.actual_profit + result.dust_value_usd;
+                                let total_pct = (total_profit / result.initial_amount) * 100.0;
+                                info!("   Total Profit (inc. Dust): ${:.6} ({:.2}%)", total_profit, total_pct);
+                            }
                             info!("   Execution time: {}ms", result.execution_time_ms);
                             info!("   Total fees: ${:.6}", result.total_fees);
                             
@@ -275,12 +294,12 @@ async fn run_arbitrage_cycle(
         }
     }
 
-    // Show top 5 opportunities for monitoring
-    for (i, opportunity) in opportunities.iter().take(5).enumerate() {
-        if i > 0 { // We already logged the first one above
-            log_arbitrage_opportunity(opportunity, i + 1);
-        }
-    }
+    // Show top 5 opportunities for monitoring - REMOVED to reduce spam
+    // for (i, opportunity) in opportunities.iter().take(5).enumerate() {
+    //     if i > 0 { // We already logged the first one above
+    //         log_arbitrage_opportunity(opportunity, i + 1);
+    //     }
+    // }
 
     // Only log cycle summary every 300 cycles
     if cycle_count % crate::config::CYCLE_SUMMARY_INTERVAL as u64 == 0 {

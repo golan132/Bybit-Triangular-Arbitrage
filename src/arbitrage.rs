@@ -245,13 +245,19 @@ impl ArbitrageEngine {
             let (amount_after_trade, effective_price, is_sell) = if pair.base == *from_currency {
                 // Selling base for quote (from_currency/to_currency)
                 // When selling, we get the bid price (what market makers will pay us)
-                let received = current_amount / pair.bid_price;
+                if pair.bid_price <= 0.0 {
+                    return None; // Invalid price
+                }
+                let received = current_amount * pair.bid_price;
                 prices.push(pair.bid_price);
                 (received, pair.bid_price, true)
             } else {
                 // Buying base with quote (to_currency/from_currency)  
                 // When buying, we pay the ask price (what market makers will sell for)
-                let received = current_amount * pair.ask_price;
+                if pair.ask_price <= 0.0 {
+                    return None; // Invalid price
+                }
+                let received = current_amount / pair.ask_price;
                 prices.push(pair.ask_price);
                 (received, pair.ask_price, false)
             };
@@ -287,8 +293,8 @@ impl ArbitrageEngine {
         let profit_amount = current_amount - test_amount;
         let profit_pct = (profit_amount / test_amount) * 100.0;
 
-        // Apply realistic slippage penalty (0.2% per trade = 0.6% total for 3 trades)
-        let slippage_penalty = 0.6; // 0.6% total slippage
+        // Apply realistic slippage penalty (0.05% per trade = 0.15% total for 3 trades)
+        let slippage_penalty = 0.15; 
         let profit_pct_with_slippage = profit_pct - slippage_penalty;
 
         // Estimate profit in USD (assuming USDT ≈ USD)
@@ -301,6 +307,13 @@ impl ArbitrageEngine {
         };
 
         if profit_pct_with_slippage > -50.0 && profit_pct_with_slippage.is_finite() {
+            // Sanity check: Filter out unrealistic profits (> 100%) which usually indicate bad data
+            if profit_pct_with_slippage > 100.0 {
+                debug!("⚠️ Filtered out unrealistic profit: {:.2}% (Path: {})", 
+                       profit_pct_with_slippage, path.join("->"));
+                return None;
+            }
+
             // Only return reasonable profit calculations
             let opportunity = ArbitrageOpportunity {
                 path: path.clone(),

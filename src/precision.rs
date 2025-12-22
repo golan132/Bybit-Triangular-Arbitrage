@@ -49,6 +49,30 @@ impl PrecisionManager {
         
         self.process_instruments_info(instruments)?;
         
+        // Load existing cache if available
+        if let Err(e) = self.load_cache_from_file("precision_cache.json") {
+            debug!("No existing precision cache found or failed to load: {}", e);
+        }
+
+        // Update cache with any missing symbols from API data
+        // This ensures the cache file contains ALL pairs, while preserving existing "learned" values
+        let mut new_entries = 0;
+        for (symbol, info) in &self.symbol_precision {
+            // If the symbol is not in our cache, add it with the API-derived precision
+            if !self.working_decimals_cache.contains_key(symbol) {
+                self.working_decimals_cache.insert(symbol.clone(), info.qty_precision);
+                new_entries += 1;
+            }
+        }
+        
+        if new_entries > 0 {
+            info!("♻️  Added {} new symbols to precision cache", new_entries);
+            // Save the updated cache immediately to ensure file is up to date
+            self.save_cache_to_file("precision_cache.json")?;
+        } else {
+            info!("✅ Precision cache is up to date ({} symbols)", self.working_decimals_cache.len());
+        }
+
         info!("✅ Precision data loaded for {} symbols and {} coins", 
               self.symbol_precision.len(), self.coin_precision.len());
         
@@ -57,15 +81,31 @@ impl PrecisionManager {
 
     /// Process instruments info and extract precision data
     fn process_instruments_info(&mut self, instruments: InstrumentsInfoResult) -> Result<()> {
+        let mut log_count = 0;
         for instrument in instruments.list {
             // Skip non-active instruments
             if instrument.status != "Trading" {
                 continue;
             }
 
-            let qty_precision = self.extract_precision_from_step(&instrument.lot_size_filter.as_ref()
-                .and_then(|f| f.qty_step.as_ref()))
-                .unwrap_or(8); // Default to 8 decimals if not found
+            let qty_step_str = instrument.lot_size_filter.as_ref().and_then(|f| f.qty_step.as_ref());
+            let min_qty_str = instrument.lot_size_filter.as_ref().map(|f| &f.min_order_qty);
+
+            // Try to get precision from qtyStep, fallback to minOrderQty
+            // If both fail, use coin-based heuristics instead of defaulting to 8
+            let mut qty_precision = self.extract_precision_from_step(&qty_step_str)
+                .or_else(|| self.extract_precision_from_step(&min_qty_str.map(|s| s)))
+                .unwrap_or_else(|| {
+                    // Fallback to coin precision heuristics
+                    self.get_coin_precision_heuristic(&instrument.base_coin)
+                });
+
+            // Special case: If precision is 8 (default/high) but coin is known to be low precision, override it
+            // This catches cases where API returns weird data for meme coins
+            let heuristic = self.get_coin_precision_heuristic(&instrument.base_coin);
+            if qty_precision > 4 && heuristic == 0 {
+                qty_precision = 0;
+            }
 
             let price_precision = self.extract_precision_from_step(&instrument.price_filter.as_ref()
                 .and_then(|f| f.tick_size.as_ref()))
@@ -142,6 +182,19 @@ impl PrecisionManager {
         None
     }
 
+    /// Heuristic for coin precision based on known types (Meme coins, etc.)
+    fn get_coin_precision_heuristic(&self, coin: &str) -> u32 {
+        match coin {
+            "NEAR" | "XRP" | "ADA" | "MATIC" | "DOT" | "EOS" | "XLM" | "SEI" | "SUI" | "FTM" => 2,
+            "SOL" | "LTC" | "BCH" | "BNB" | "AVAX" | "LINK" | "UNI" | "AAVE" | "ATOM" => 3,
+            "DOGE" | "TRX" | "SHIB" | "BONK" | "PEPE" | "FLOKI" | "LUNC" | "BOME" | "MEME" | "WIF" => 0,
+            "BTC" => 5,
+            "ETH" => 4,
+            "USDT" | "USDC" | "BUSD" | "DAI" | "FDUSD" => 8,
+            _ => 4 // Default safe value
+        }
+    }
+
     /// Get precision info for a specific symbol
     pub fn get_symbol_precision(&self, symbol: &str) -> Option<&PrecisionInfo> {
         self.symbol_precision.get(symbol)
@@ -150,18 +203,7 @@ impl PrecisionManager {
     /// Get quantity precision for a specific coin
     pub fn get_coin_precision(&self, coin: &str) -> u32 {
         self.coin_precision.get(coin).copied().unwrap_or_else(|| {
-            // Fallback to hardcoded values for known coins
-            match coin {
-                "NEAR" => 2,
-                "BCH" => 4,
-                "BTC" => 5,
-                "ETH" => 6,
-                "USDT" | "USDC" | "BUSD" => 8,
-                _ => {
-                    warn!("⚠️ Unknown coin precision for {}, using default 8 decimals", coin);
-                    8
-                }
-            }
+            self.get_coin_precision_heuristic(coin)
         })
     }
 
@@ -268,15 +310,26 @@ impl PrecisionManager {
     /// Format quantity with automatic precision reduction for API compatibility
     /// Starts with 6 decimals max, then reduces based on retry count
     pub fn format_quantity_with_retry(&self, symbol: &str, quantity: f64, retry_count: u32) -> String {
-        // Start with maximum 6 decimals, then reduce based on retry count
-        let max_decimals = (6_i32 - retry_count as i32).max(0) as u32;
+        // Aggressive backoff strategy for precision retries
+        // 0: 6 decimals (High precision)
+        // 1: 4 decimals (Standard crypto)
+        // 2: 2 decimals (Low precision / Fiat-like)
+        // 3: 1 decimal
+        // 4+: 0 decimals (Integer)
+        let max_decimals = match retry_count {
+            0 => 6,
+            1 => 4,
+            2 => 2,
+            3 => 1,
+            _ => 0
+        };
         
         // For insufficient balance retries, also reduce the quantity slightly to ensure we don't hit balance limits
-        let adjusted_quantity = if retry_count > 3 {
-            // After 3 precision retries, start reducing quantity by 0.1% per retry to avoid balance issues
-            let reduction_factor = 1.0 - (retry_count as f64 - 3.0) * 0.001; // 0.1% reduction per retry after retry 3
+        let adjusted_quantity = if retry_count > 2 {
+            // After 2 precision retries, start reducing quantity by 0.5% per retry to avoid balance issues
+            let reduction_factor = 1.0 - (retry_count as f64 - 2.0) * 0.005; 
             let new_quantity = quantity * reduction_factor;
-            tracing::info!("🔽 Reducing quantity due to balance issues: {:.8} → {:.8} ({}% reduction)", 
+            tracing::info!("🔽 Reducing quantity due to balance/precision issues: {:.8} → {:.8} ({:.2}% reduction)", 
                          quantity, new_quantity, (1.0 - reduction_factor) * 100.0);
             new_quantity
         } else {

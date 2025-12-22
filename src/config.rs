@@ -53,9 +53,9 @@ impl Config {
             .unwrap_or(4.0);
 
         let min_profit_threshold = env::var("MIN_PROFIT_THRESHOLD")
-            .unwrap_or_else(|_| "0.5".to_string())
+            .unwrap_or_else(|_| "0.05".to_string())
             .parse::<f64>()
-            .unwrap_or(0.5);
+            .unwrap_or(0.05);
 
         let trading_fee_rate = env::var("TRADING_FEE_RATE")
             .unwrap_or_else(|_| "0.0015".to_string())
@@ -92,14 +92,14 @@ impl Config {
 }
 
 // Constants for arbitrage calculations
-pub const MIN_PROFIT_THRESHOLD: f64 = 0.5; // Show any profit above 0.5% (50 basis points)
-pub const MAX_TRIANGLES_TO_SCAN: usize = 1000; // Maximum triangles to process
-pub const BALANCE_REFRESH_INTERVAL_SECS: u64 = 300; // 5 minutes
-pub const PRICE_REFRESH_INTERVAL_SECS: u64 = 10; // 10 seconds
-pub const CYCLE_SUMMARY_INTERVAL: usize = 300; // Log summary every 300 cycles
+pub const MIN_PROFIT_THRESHOLD: f64 = 0.05; // Show any profit above 0.05%
+pub const MAX_TRIANGLES_TO_SCAN: usize = 2000; // Maximum triangles to process
+pub const BALANCE_REFRESH_INTERVAL_SECS: u64 = 60; // 1 minute
+pub const PRICE_REFRESH_INTERVAL_SECS: u64 = 2; // 2 seconds
+pub const CYCLE_SUMMARY_INTERVAL: usize = 100; // Log summary every 100 cycles
 
 // Realistic trading filters
-pub const MIN_VOLUME_24H_USD: f64 = 100000.0; // Minimum 24h volume in USD for liquidity (increased for safety)
+pub const MIN_VOLUME_24H_USD: f64 = 10000.0; // Minimum 24h volume in USD for liquidity (increased for safety)
 pub const MIN_BID_SIZE_USD: f64 = 100.0; // Minimum bid size in USD (lowered)
 pub const MIN_ASK_SIZE_USD: f64 = 100.0; // Minimum ask size in USD (lowered)
 pub const MAX_SPREAD_PERCENT: f64 = 1.0; // Maximum bid/ask spread percentage (decreased for tighter spreads)

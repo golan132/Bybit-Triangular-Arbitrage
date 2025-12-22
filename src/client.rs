@@ -218,7 +218,7 @@ impl BybitClient {
 
     /// Fetch ticker prices for all symbols
     pub async fn get_tickers(&self, category: &str) -> Result<TickersResult> {
-        info!("Fetching tickers for category: {}", category);
+        debug!("Fetching tickers for category: {}", category);
         
         let query_params = format!("category={}", category);
 
@@ -226,7 +226,7 @@ impl BybitClient {
             .public_request::<TickersResult>(&self.config.tickers_endpoint(), &query_params)
             .await?;
 
-        info!("Successfully fetched {} tickers for category {}", result.list.len(), category);
+        debug!("Successfully fetched {} tickers for category {}", result.list.len(), category);
         Ok(result)
     }
 
@@ -245,8 +245,8 @@ impl BybitClient {
 
     /// Place a new order
     pub async fn place_order(&self, order_request: crate::models::PlaceOrderRequest) -> Result<crate::models::PlaceOrderResult> {
-        info!("Placing {} order: {} {} @ {:?}", 
-              order_request.side, order_request.qty, order_request.symbol, order_request.price);
+        // info!("Placing {} order: {} {} @ {:?}", 
+        //       order_request.side, order_request.qty, order_request.symbol, order_request.price);
         
         let endpoint = format!("{}/v5/order/create", self.config.base_url);
         let body = serde_json::to_string(&order_request)?;

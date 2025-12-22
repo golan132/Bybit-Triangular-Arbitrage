@@ -17,6 +17,7 @@ pub struct TradeExecution {
     pub order_id: String,
     pub executed_price: f64,
     pub executed_quantity: f64,
+    pub executed_value: f64,
     pub fee: f64,
 }
 
@@ -27,6 +28,8 @@ pub struct ArbitrageExecutionResult {
     pub final_amount: f64,
     pub actual_profit: f64,
     pub actual_profit_pct: f64,
+    pub dust_value_usd: f64,
+    pub dust_assets: HashMap<String, f64>,
     pub executions: Vec<TradeExecution>,
     pub total_fees: f64,
     pub execution_time_ms: u64,
@@ -106,6 +109,8 @@ impl ArbitrageTrader {
         let mut executions = Vec::new();
         let mut current_amount = amount;
         let mut total_fees = 0.0;
+        let mut dust_assets: HashMap<String, f64> = HashMap::new();
+        let mut dust_value_usd = 0.0;
 
         // Execute each step of the arbitrage
         for (step, pair_symbol) in opportunity.pairs.iter().enumerate() {
@@ -119,6 +124,8 @@ impl ArbitrageTrader {
                     final_amount: current_amount,
                     actual_profit: current_amount - amount,
                     actual_profit_pct: ((current_amount - amount) / amount) * 100.0,
+                    dust_value_usd,
+                    dust_assets,
                     executions,
                     total_fees,
                     execution_time_ms: start_time.elapsed().as_millis() as u64,
@@ -136,38 +143,68 @@ impl ArbitrageTrader {
             
             match self.execute_trade_step(step + 1, pair_symbol, trade_amount, &opportunity).await {
                 Ok(execution) => {
-                    // For each step, calculate what amount we actually have in the target currency
-                    let new_amount = match step + 1 {
-                        1 => {
-                            // Step 1: USDT → ICP, execution.executed_quantity is ICP we bought
-                            // Account for potential small rounding differences
-                            let actual_received = execution.executed_quantity * 0.999; // 0.1% buffer for fees/slippage
-                            info!("💰 Step 1: Received {:.8} {}, using {:.8} for next step", 
-                                  execution.executed_quantity, &opportunity.path[1], actual_received);
-                            actual_received
-                        },
-                        2 => {
-                            // Step 2: ICP → USDC, execution.executed_quantity is USDC we bought
-                            let actual_received = execution.executed_quantity * 0.999; // 0.1% buffer
-                            info!("💰 Step 2: Received {:.8} {}, using {:.8} for next step", 
-                                  execution.executed_quantity, &opportunity.path[2], actual_received);
-                            actual_received
-                        },
-                        3 => {
-                            // Step 3: Converting back to start currency (usually USDT)
-                            // For triangular arbitrage, this should give us USDT back
-                            // The executed_quantity is the amount we received in the start currency
-                            let final_amount = execution.executed_quantity;
-                            info!("💰 Step 3: Final {} received: {:.8}", &opportunity.path[3], final_amount);
-                            final_amount
-                        },
-                        _ => execution.executed_quantity
+                    // Calculate dust (unused balance)
+                    let used_amount = if execution.side == "Buy" {
+                        execution.executed_value // Quote currency used
+                    } else {
+                        execution.executed_quantity // Base currency used
                     };
                     
-                    info!("✅ Step {} completed: {:.6} → {:.6}", 
-                          step + 1, current_amount, new_amount);
+                    let dust = trade_amount - used_amount;
+                    if dust > 0.00000001 { // Ignore tiny floating point errors
+                        let currency = &opportunity.path[step];
+                        *dust_assets.entry(currency.clone()).or_insert(0.0) += dust;
+                        
+                        // Estimate USD value of dust
+                        let estimated_value = if step == 0 {
+                            // Dust is in start currency (e.g. USDT)
+                            dust
+                        } else if step == 2 {
+                            // Dust is in 3rd currency (e.g. MET), about to be converted to start (USDT)
+                            // Step 3 trade is MET -> USDT. 
+                            if execution.side == "Sell" {
+                                dust * execution.executed_price
+                            } else {
+                                dust / execution.executed_price
+                            }
+                        } else {
+                            // Step 2 dust (e.g. USDC).
+                            // Use implied price from Step 1 execution to convert to USDT
+                            if let Some(prev_exec) = executions.last() {
+                                if prev_exec.executed_quantity > 0.0 {
+                                    // Implied rate: USDT / USDC
+                                    let rate = prev_exec.executed_value / prev_exec.executed_quantity;
+                                    dust * rate
+                                } else {
+                                    0.0
+                                }
+                            } else {
+                                0.0
+                            }
+                        };
+                        dust_value_usd += estimated_value;
+                        
+                        info!("🧹 Leftover dust: {:.8} {} (≈${:.4})", dust, currency, estimated_value);
+                    }
+
+                    // For each step, calculate what amount we actually have in the target currency
+                    // If we Bought (Base), we have executed_quantity
+                    // If we Sold (Base), we have executed_value (Quote)
+                    let received_amount = if execution.side == "Buy" {
+                        execution.executed_quantity
+                    } else {
+                        execution.executed_value
+                    };
                     
-                    current_amount = new_amount;
+                    // Account for potential small rounding differences/fees not included in qty
+                    // (Bybit fees are usually deducted from received amount)
+                    let actual_received = received_amount - execution.fee;
+                    
+                    info!("💰 Step {}: Received {:.8} {} (Qty: {:.8}, Val: {:.8}, Fee: {:.8})", 
+                          step + 1, actual_received, &opportunity.path[step + 1], 
+                          execution.executed_quantity, execution.executed_value, execution.fee);
+                    
+                    current_amount = actual_received;
                     total_fees += execution.fee;
                     executions.push(execution);
                 },
@@ -202,6 +239,8 @@ impl ArbitrageTrader {
                         final_amount: current_amount,
                         actual_profit: current_amount - amount,
                         actual_profit_pct: ((current_amount - amount) / amount) * 100.0,
+                        dust_value_usd,
+                        dust_assets,
                         executions,
                         total_fees,
                         execution_time_ms: start_time.elapsed().as_millis() as u64,
@@ -214,10 +253,16 @@ impl ArbitrageTrader {
         let execution_time = start_time.elapsed().as_millis() as u64;
         let actual_profit = current_amount - amount;
         let actual_profit_pct = (actual_profit / amount) * 100.0;
+        let total_profit_with_dust = actual_profit + dust_value_usd;
+        let total_profit_pct_with_dust = (total_profit_with_dust / amount) * 100.0;
 
         info!("🎯 ARBITRAGE COMPLETED!");
         info!("   Initial: ${:.6} → Final: ${:.6}", amount, current_amount);
-        info!("   Profit: ${:.6} ({:.2}%)", actual_profit, actual_profit_pct);
+        info!("   Realized Profit: ${:.6} ({:.2}%)", actual_profit, actual_profit_pct);
+        if dust_value_usd > 0.0 {
+            info!("   Dust Value: ${:.6}", dust_value_usd);
+            info!("   Total Profit (inc. Dust): ${:.6} ({:.2}%)", total_profit_with_dust, total_profit_pct_with_dust);
+        }
         info!("   Total fees: ${:.6}", total_fees);
         info!("   Execution time: {}ms", execution_time);
 
@@ -227,6 +272,8 @@ impl ArbitrageTrader {
             final_amount: current_amount,
             actual_profit,
             actual_profit_pct,
+            dust_value_usd,
+            dust_assets,
             executions,
             total_fees,
             execution_time_ms: execution_time,
@@ -302,6 +349,8 @@ impl ArbitrageTrader {
             .context("Failed to parse executed price")?;
         let executed_quantity: f64 = executed_order.cum_exec_qty.parse()
             .context("Failed to parse executed quantity")?;
+        let executed_value: f64 = executed_order.cum_exec_value.parse()
+            .context("Failed to parse executed value")?;
         let fee: f64 = executed_order.cum_exec_fee.parse()
             .context("Failed to parse execution fee")?;
 
@@ -314,6 +363,7 @@ impl ArbitrageTrader {
             order_id: order_result.order_id,
             executed_price,
             executed_quantity,
+            executed_value,
             fee,
         })
     }
@@ -670,6 +720,8 @@ impl ArbitrageTrader {
             final_amount: simulated_final,
             actual_profit,
             actual_profit_pct: (actual_profit / amount) * 100.0,
+            dust_value_usd: 0.0,
+            dust_assets: HashMap::new(),
             executions: Vec::new(), // Empty for simulation
             total_fees: simulated_fees,
             execution_time_ms: 50, // Simulated execution time
@@ -709,7 +761,7 @@ impl ArbitrageTrader {
         }
 
         // Fallback to traditional retry logic
-        const MAX_RETRIES: u32 = 6; // Start with 6 decimals, can reduce to 0
+        const MAX_RETRIES: u32 = 4; // 0=6dec, 1=4dec, 2=2dec, 3=1dec, 4=0dec
         
         for retry_count in 0..=MAX_RETRIES {
             // Format quantity with reduced precision based on retry count
@@ -719,8 +771,8 @@ impl ArbitrageTrader {
             let actual_quantity: f64 = formatted_quantity.parse().unwrap_or(quantity);
             
             if retry_count > 0 {
-                warn!("🔄 Retry #{} for {}: Reducing precision to {} decimals (using {:.8})", 
-                      retry_count, symbol, 6 - retry_count, actual_quantity);
+                warn!("🔄 Retry #{} for {}: Reducing precision (using {:.8})", 
+                      retry_count, symbol, actual_quantity);
             }
             
             // Validate the truncated quantity meets symbol requirements  
@@ -754,7 +806,11 @@ impl ArbitrageTrader {
                     info!("✅ Order placed successfully on attempt #{}: {}", retry_count + 1, order_result.order_id);
                     
                     // Cache the working decimal places for future use
-                    let working_decimals = 6 - retry_count;
+                    let working_decimals = if let Some(pos) = formatted_quantity.find('.') {
+                        (formatted_quantity.len() - pos - 1) as u32
+                    } else {
+                        0
+                    };
                     self.precision_manager.cache_working_decimals(symbol, working_decimals);
                     
                     return Ok(order_result);

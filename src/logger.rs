@@ -1,10 +1,20 @@
 use tracing::{info, warn, error, debug};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
+struct LocalTimer;
+
+impl tracing_subscriber::fmt::time::FormatTime for LocalTimer {
+    fn format_time(&self, w: &mut tracing_subscriber::fmt::format::Writer<'_>) -> std::fmt::Result {
+        let now = chrono::Local::now();
+        write!(w, "{}", now.format("%Y-%m-%d %H:%M:%S"))
+    }
+}
+
 /// Initialize the logging system
 pub fn init_logger() -> Result<(), anyhow::Error> {
     // Create a custom format for logs
     let fmt_layer = fmt::layer()
+        .with_timer(LocalTimer)
         .with_target(false)
         .with_thread_ids(false)
         .with_thread_names(false)
