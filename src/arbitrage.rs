@@ -4,6 +4,7 @@ use crate::models::ArbitrageOpportunity;
 use crate::pairs::{PairManager, TrianglePairs};
 use chrono::Utc;
 use tracing::{debug, info, warn};
+use rayon::prelude::*;
 
 #[derive(Debug, Clone)]
 pub enum TradeDirection {
@@ -79,43 +80,36 @@ impl ArbitrageEngine {
     ) -> Vec<ArbitrageOpportunity> {
         self.opportunities.clear();
         let tradeable_coins = balance_manager.get_tradeable_coins(min_trade_amount);
-        let mut total_scanned = 0;
-
-        if tradeable_coins.is_empty() {
-            // If no sufficient balances, scan with popular base currencies to show potential opportunities
-            let popular_coins = vec![
+        
+        let coins_to_scan = if tradeable_coins.is_empty() {
+            debug!("No tradeable coins with balance >= ${:.0}, scanning popular currencies for reference", min_trade_amount);
+            vec![
                 "USDT".to_string(),
                 "BTC".to_string(), 
                 "ETH".to_string(),
                 "USDC".to_string(),
                 "BNB".to_string(),
-            ];
-            
-            debug!("No tradeable coins with balance >= ${:.0}, scanning popular currencies for reference", min_trade_amount);
-            
-            for base_currency in &popular_coins {
-                if total_scanned >= self.max_scan_count {
-                    break;
-                }
-                total_scanned += self.scan_for_base_currency(base_currency, min_trade_amount, pair_manager);
-            }
+            ]
         } else {
-            // Focus on assets we actually have sufficient balances for
             debug!("Scanning {} tradeable coins: {:?}", tradeable_coins.len(), tradeable_coins);
-            
-            for base_currency in &tradeable_coins {
-                if total_scanned >= self.max_scan_count {
-                    warn!("⚠️ Reached maximum scan limit of {} triangles", self.max_scan_count);
-                    break;
-                }
+            tradeable_coins
+        };
 
+        // Use Rayon for parallel scanning
+        let results: Vec<(usize, Vec<ArbitrageOpportunity>)> = coins_to_scan.par_iter()
+            .map(|base_currency| {
                 let balance = balance_manager.get_balance(base_currency);
-                
                 // Use the minimum trade amount or a portion of balance, whichever is larger
                 let test_amount = min_trade_amount.max((balance * 0.1).min(1000.0));
+                
+                self.scan_for_base_currency(base_currency, test_amount, pair_manager)
+            })
+            .collect();
 
-                total_scanned += self.scan_for_base_currency(base_currency, test_amount, pair_manager);
-            }
+        let mut total_scanned = 0;
+        for (scanned, opps) in results {
+            total_scanned += scanned;
+            self.opportunities.extend(opps);
         }
 
         // Sort opportunities by profit percentage (highest first)
@@ -134,13 +128,14 @@ impl ArbitrageEngine {
     
     /// Scan for arbitrage opportunities using a specific base currency
     fn scan_for_base_currency(
-        &mut self,
+        &self,
         base_currency: &str,
         test_amount: f64,
         pair_manager: &PairManager,
-    ) -> usize {
+    ) -> (usize, Vec<ArbitrageOpportunity>) {
         let triangles = pair_manager.find_triangle_pairs(base_currency);
         let mut scanned_count = 0;
+        let mut found_opportunities = Vec::new();
         
         for triangle in triangles.iter().take(self.max_scan_count) {
             // Pre-filter triangles by liquidity
@@ -155,14 +150,14 @@ impl ArbitrageEngine {
                 pair_manager,
             ) {
                 if opportunity.estimated_profit_pct >= self.profit_threshold {
-                    self.opportunities.push(opportunity);
+                    found_opportunities.push(opportunity);
                 }
             }
             scanned_count += 1;
         }
         
         debug!("Scanned {} triangles for {}", scanned_count, base_currency);
-        scanned_count
+        (scanned_count, found_opportunities)
     }
 
     /// Check if triangle meets minimum liquidity requirements

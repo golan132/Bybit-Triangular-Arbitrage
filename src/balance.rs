@@ -65,7 +65,7 @@ impl BalanceManager {
                     }
                 }
                 Err(e) => {
-                    debug!("Failed to fetch {} balance: {}", account_type, e);
+                    warn!("Failed to fetch {} balance: {}", account_type, e);
                 }
             }
         }

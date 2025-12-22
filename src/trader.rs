@@ -318,7 +318,7 @@ impl ArbitrageTrader {
                 }
             }
 
-            sleep(Duration::from_millis(100)).await; // Check every 100ms (reduced API calls)
+            sleep(Duration::from_millis(20)).await; // Check every 20ms (reduced for lower latency)
         }
     }
 

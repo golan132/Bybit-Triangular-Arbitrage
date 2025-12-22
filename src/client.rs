@@ -19,6 +19,8 @@ impl BybitClient {
         
         let client = Client::builder()
             .timeout(std::time::Duration::from_secs(config.request_timeout_secs))
+            .tcp_nodelay(true)
+            .pool_idle_timeout(std::time::Duration::from_secs(90))
             .default_headers(headers)
             .build()?;
 
@@ -97,8 +99,20 @@ impl BybitClient {
             return Err(anyhow::anyhow!("HTTP error {}: {}", status, response_text));
         }
 
-        let api_response: ApiResponse<T> = serde_json::from_str(&response_text)
-            .context("Failed to parse API response")?;
+        // Parse as generic JSON first to check return code
+        let json_response: serde_json::Value = serde_json::from_str(&response_text)
+            .context("Failed to parse API response as JSON")?;
+            
+        let ret_code = json_response["retCode"].as_i64().unwrap_or(-1);
+        
+        if ret_code != 0 {
+            let ret_msg = json_response["retMsg"].as_str().unwrap_or("Unknown error");
+            return Err(anyhow::anyhow!("API Error {}: {}", ret_code, ret_msg));
+        }
+
+        // If success, parse into the expected type
+        let api_response: ApiResponse<T> = serde_json::from_value(json_response)
+            .context("Failed to parse API response structure")?;
 
         api_response.into_result()
             .map_err(|e| anyhow::anyhow!("API error: {}", e))
@@ -138,8 +152,20 @@ impl BybitClient {
             return Err(anyhow::anyhow!("HTTP error {}: {}", status, response_text));
         }
 
-        let api_response: ApiResponse<T> = serde_json::from_str(&response_text)
-            .context("Failed to parse API response")?;
+        // Parse as generic JSON first to check return code
+        let json_response: serde_json::Value = serde_json::from_str(&response_text)
+            .context("Failed to parse API response as JSON")?;
+            
+        let ret_code = json_response["retCode"].as_i64().unwrap_or(-1);
+        
+        if ret_code != 0 {
+            let ret_msg = json_response["retMsg"].as_str().unwrap_or("Unknown error");
+            return Err(anyhow::anyhow!("API Error {}: {}", ret_code, ret_msg));
+        }
+
+        // If success, parse into the expected type
+        let api_response: ApiResponse<T> = serde_json::from_value(json_response)
+            .context("Failed to parse API response structure")?;
 
         api_response.into_result()
             .map_err(|e| anyhow::anyhow!("API error: {}", e))
