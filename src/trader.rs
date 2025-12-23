@@ -293,26 +293,24 @@ impl ArbitrageTrader {
             }
 
             // Check if we have any balance of the required currency
-            match self.client.get_wallet_balance(Some("UNIFIED")).await {
-                Ok(balance_result) => {
+            // Try different account types
+            let account_types = vec!["UNIFIED", "SPOT", "CONTRACT"];
+            
+            for acct_type in account_types {
+                if let Ok(balance_result) = self.client.get_wallet_balance(Some(acct_type)).await {
                     if let Some(account) = balance_result.list.first() {
                         if let Some(coin_balance) = account.coin.iter().find(|c| &c.coin == required_currency) {
-                            let available_balance: f64 = coin_balance.wallet_balance.parse().unwrap_or(0.0);
-                            
+                            let available_balance: f64 = coin_balance.wallet_balance.as_ref().and_then(|s| s.parse().ok()).unwrap_or(0.0);
                             if available_balance > 0.0 {
-                                debug!("✅ Balance settled: {} {} available", available_balance, required_currency);
+                                debug!("✅ Balance settled: {} {} available (in {})", available_balance, required_currency, acct_type);
                                 return Ok(available_balance);
                             }
                         }
                     }
                 }
-                Err(_) => {
-                    // If balance check fails, just continue
-                    // return Ok(()); // Old
-                }
             }
 
-            sleep(Duration::from_millis(20)).await; // Check every 20ms (reduced for lower latency)
+            sleep(Duration::from_millis(20)).await; // Check every 20ms
         }
     }
 
@@ -388,7 +386,7 @@ impl ArbitrageTrader {
                 Ok(balance_result) => {
                     if let Some(account) = balance_result.list.first() {
                         if let Some(coin_balance) = account.coin.iter().find(|c| &c.coin == required_currency) {
-                            coin_balance.wallet_balance.parse().unwrap_or(0.0)
+                            coin_balance.wallet_balance.as_ref().and_then(|s| s.parse().ok()).unwrap_or(0.0)
                         } else {
                             0.0
                         }
@@ -597,7 +595,7 @@ impl ArbitrageTrader {
             Ok(balance_result) => {
                 if let Some(account) = balance_result.list.first() {
                     if let Some(coin_balance) = account.coin.iter().find(|c| &c.coin == currency) {
-                        let balance: f64 = coin_balance.wallet_balance.parse().unwrap_or(0.0);
+                        let balance: f64 = coin_balance.wallet_balance.as_ref().and_then(|s| s.parse().ok()).unwrap_or(0.0);
                         Ok(balance)
                     } else {
                         Ok(0.0)
@@ -619,7 +617,7 @@ impl ArbitrageTrader {
         match self.client.get_ticker("spot", symbol).await {
             Ok(ticker_result) => {
                 if let Some(ticker) = ticker_result.list.first() {
-                    ticker.last_price.parse::<f64>().ok()
+                    ticker.last_price.as_ref().and_then(|s| s.parse::<f64>().ok())
                 } else {
                     None
                 }

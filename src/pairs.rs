@@ -22,6 +22,84 @@ impl PairManager {
         }
     }
 
+    pub fn get_all_symbols(&self) -> Vec<String> {
+        self.pairs.iter().map(|p| p.symbol.clone()).collect()
+    }
+
+    /// Get only liquid symbols for optimized WebSocket subscription
+    pub fn get_liquid_symbols(&self) -> Vec<String> {
+        self.pairs.iter()
+            .filter(|p| p.is_liquid && p.is_active)
+            .map(|p| p.symbol.clone())
+            .collect()
+    }
+
+    pub fn update_from_ticker(&mut self, ticker: &crate::models::TickerInfo) {
+        // Try to get price from last_price, or keep existing if not present
+        let price_opt = ticker.last_price.as_ref().and_then(|s| s.parse::<f64>().ok());
+        
+        if let Some(&idx) = self.symbol_to_pair.get(&ticker.symbol) {
+            if let Some(pair) = self.pairs.get_mut(idx) {
+                // Update last price if available
+                if let Some(price) = price_opt {
+                    pair.price = price;
+                    self.price_map.insert(ticker.symbol.clone(), price);
+                }
+                
+                // Also update bid/ask if available
+                let mut prices_updated = false;
+                
+                if let Some(bid) = ticker.bid1_price.as_ref().and_then(|s| s.parse::<f64>().ok()) {
+                    if bid > 0.0 {
+                        pair.bid_price = bid;
+                        prices_updated = true;
+                    }
+                }
+                
+                if let Some(ask) = ticker.ask1_price.as_ref().and_then(|s| s.parse::<f64>().ok()) {
+                    if ask > 0.0 {
+                        pair.ask_price = ask;
+                        prices_updated = true;
+                    }
+                }
+
+                if prices_updated {
+                    // Re-calculate spread
+                    if pair.bid_price > 0.0 {
+                        pair.spread_percent = ((pair.ask_price - pair.bid_price) / pair.bid_price) * 100.0;
+                    }
+                }
+                
+                // Update volume if available
+                if let Some(vol) = ticker.volume24h.as_ref().and_then(|s| s.parse::<f64>().ok()) {
+                    pair.volume_24h = vol;
+                }
+
+                // Update liquidity status
+                // Estimate 24h volume in USD
+                let volume_24h_usd = if let Some(turnover) = ticker.turnover24h.as_ref().and_then(|s| s.parse::<f64>().ok()) {
+                    turnover
+                } else {
+                    pair.volume_24h * pair.price
+                };
+                pair.volume_24h_usd = volume_24h_usd;
+
+                // Re-evaluate liquidity
+                if let Some(bs) = ticker.bid1_size.as_ref().and_then(|s| s.parse::<f64>().ok()) {
+                    pair.bid_size = bs;
+                }
+                if let Some(as_size) = ticker.ask1_size.as_ref().and_then(|s| s.parse::<f64>().ok()) {
+                    pair.ask_size = as_size;
+                }
+
+                pair.is_liquid = pair.volume_24h_usd >= crate::config::MIN_VOLUME_24H_USD
+                    && pair.spread_percent <= crate::config::MAX_SPREAD_PERCENT
+                    && pair.bid_size * pair.bid_price >= crate::config::MIN_BID_SIZE_USD
+                    && pair.ask_size * pair.ask_price >= crate::config::MIN_ASK_SIZE_USD;
+            }
+        }
+    }
+
     /// Fetch all trading pairs and their current prices
     pub async fn update_pairs_and_prices(&mut self, client: &BybitClient) -> Result<()> {
         info!("🔄 Updating trading pairs and prices...");
@@ -47,7 +125,7 @@ impl PairManager {
         // Create price map from tickers (for backward compatibility)
         let mut price_map = HashMap::new();
         for ticker in &tickers_result.list {
-            if let Ok(price) = ticker.last_price.parse::<f64>() {
+            if let Some(price) = ticker.last_price.as_ref().and_then(|s| s.parse::<f64>().ok()) {
                 price_map.insert(ticker.symbol.clone(), price);
             }
         }
@@ -78,6 +156,12 @@ impl PairManager {
                            pair.bid_price > 0.0 && pair.ask_price > 0.0 && 
                            pair.bid_price < pair.ask_price);
 
+        // Rebuild symbol_to_pair map after filtering
+        symbol_to_pair.clear();
+        for (idx, pair) in pairs.iter().enumerate() {
+            symbol_to_pair.insert(pair.symbol.clone(), idx);
+        }
+
         if blacklisted_count > 0 {
             info!("🚫 Filtered out {} pairs containing blacklisted tokens", blacklisted_count);
         }
@@ -94,67 +178,7 @@ impl PairManager {
         Ok(())
     }
 
-    /// Update only prices from tickers (lighter update, much faster)
-    pub async fn update_prices(&mut self, client: &BybitClient) -> Result<()> {
-        // Fetch tickers for prices
-        let tickers_result = client
-            .get_tickers("spot")
-            .await
-            .context("Failed to fetch tickers")?;
 
-        // Update prices in map and pairs
-        for ticker in &tickers_result.list {
-            if let Ok(price) = ticker.last_price.parse::<f64>() {
-                self.price_map.insert(ticker.symbol.clone(), price);
-                
-                if let Some(&idx) = self.symbol_to_pair.get(&ticker.symbol) {
-                    if let Some(pair) = self.pairs.get_mut(idx) {
-                        pair.price = price;
-                        
-                        // Also update bid/ask if available
-                        if let (Ok(bid), Ok(ask)) = (ticker.bid1_price.parse::<f64>(), ticker.ask1_price.parse::<f64>()) {
-                            // Only update if prices are valid and positive
-                            if bid > 0.0 && ask > 0.0 {
-                                pair.bid_price = bid;
-                                pair.ask_price = ask;
-                                
-                                // Re-calculate spread
-                                pair.spread_percent = ((ask - bid) / bid) * 100.0;
-                            }
-                        }
-                        
-                        // Update volume if available
-                        if let Ok(vol) = ticker.volume24h.parse::<f64>() {
-                            pair.volume_24h = vol;
-                        }
-
-                        // Update liquidity status
-                        // Estimate 24h volume in USD
-                        let volume_24h_usd = if let Ok(turnover) = ticker.turnover24h.parse::<f64>() {
-                            turnover
-                        } else {
-                            pair.volume_24h * pair.price
-                        };
-                        pair.volume_24h_usd = volume_24h_usd;
-
-                        // Re-evaluate liquidity
-                        let bid_size = ticker.bid1_size.parse().unwrap_or(0.0);
-                        let ask_size = ticker.ask1_size.parse().unwrap_or(0.0);
-                        pair.bid_size = bid_size;
-                        pair.ask_size = ask_size;
-
-                        pair.is_liquid = volume_24h_usd >= crate::config::MIN_VOLUME_24H_USD
-                            && pair.spread_percent <= crate::config::MAX_SPREAD_PERCENT
-                            && bid_size * pair.bid_price >= crate::config::MIN_BID_SIZE_USD
-                            && ask_size * pair.ask_price >= crate::config::MIN_ASK_SIZE_USD;
-                    }
-                }
-            }
-        }
-        
-        self.last_updated = Some(chrono::Utc::now());
-        Ok(())
-    }
 
     /// Get all market pairs
     pub fn get_pairs(&self) -> &[MarketPair] {
@@ -315,16 +339,7 @@ impl PairManager {
     }
 
     /// Check if data needs refresh
-    pub fn needs_refresh(&self, interval_secs: u64) -> bool {
-        match self.last_updated {
-            None => true,
-            Some(last_update) => {
-                let now = chrono::Utc::now();
-                let duration = now.signed_duration_since(last_update);
-                duration.num_seconds() as u64 >= interval_secs
-            }
-        }
-    }
+
 
     /// Log pair statistics for debugging
     fn log_pair_statistics(&self) {

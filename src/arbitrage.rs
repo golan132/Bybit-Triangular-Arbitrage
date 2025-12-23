@@ -12,6 +12,7 @@ pub struct ArbitrageEngine {
     profit_threshold: f64,
     max_scan_count: usize,
     trading_fee_rate: f64, // Bybit spot trading fee (usually 0.1%)
+    pub global_best: Option<ArbitrageOpportunity>,
 }
 
 impl ArbitrageEngine {
@@ -21,6 +22,7 @@ impl ArbitrageEngine {
             profit_threshold: MIN_PROFIT_THRESHOLD,
             max_scan_count: MAX_TRIANGLES_TO_SCAN,
             trading_fee_rate: 0.001, // 0.1% trading fee
+            global_best: None,
         }
     }
 
@@ -30,6 +32,7 @@ impl ArbitrageEngine {
             profit_threshold,
             max_scan_count,
             trading_fee_rate: fee_rate,
+            global_best: None,
         }
     }
 
@@ -58,7 +61,7 @@ impl ArbitrageEngine {
         };
 
         // Use Rayon for parallel scanning
-        let results: Vec<(usize, Vec<ArbitrageOpportunity>)> = coins_to_scan.par_iter()
+        let results: Vec<(usize, Vec<ArbitrageOpportunity>, Option<ArbitrageOpportunity>)> = coins_to_scan.par_iter()
             .map(|base_currency| {
                 let balance = balance_manager.get_balance(base_currency);
                 // Use the minimum trade amount or a portion of balance, whichever is larger
@@ -69,9 +72,32 @@ impl ArbitrageEngine {
             .collect();
 
         let mut total_scanned = 0;
-        for (scanned, opps) in results {
+        let mut cycle_best: Option<ArbitrageOpportunity> = None;
+
+        for (scanned, opps, best_in_coin) in results {
             total_scanned += scanned;
             self.opportunities.extend(opps);
+            
+            if let Some(best) = best_in_coin {
+                if cycle_best.as_ref().map_or(true, |o| best.estimated_profit_pct > o.estimated_profit_pct) {
+                    cycle_best = Some(best);
+                }
+            }
+        }
+
+        // Update global best
+        if let Some(ref current) = cycle_best {
+            if self.global_best.as_ref().map_or(true, |g| current.estimated_profit_pct > g.estimated_profit_pct) {
+                self.global_best = Some(current.clone());
+            }
+        }
+
+        // Log best opportunities
+        if let Some(best) = &cycle_best {
+             debug!("📉 Cycle Best: {:.4}% via {} (Prices: {:?})", best.estimated_profit_pct, best.display_pairs(), best.prices);
+        }
+        if let Some(global) = &self.global_best {
+             debug!("🏆 Global Best: {:.4}% via {} (Prices: {:?})", global.estimated_profit_pct, global.display_pairs(), global.prices);
         }
 
         // Sort opportunities by profit percentage (highest first)
@@ -94,10 +120,11 @@ impl ArbitrageEngine {
         base_currency: &str,
         test_amount: f64,
         pair_manager: &PairManager,
-    ) -> (usize, Vec<ArbitrageOpportunity>) {
+    ) -> (usize, Vec<ArbitrageOpportunity>, Option<ArbitrageOpportunity>) {
         let triangles = pair_manager.find_triangle_pairs(base_currency);
         let mut scanned_count = 0;
         let mut found_opportunities = Vec::new();
+        let mut best_opp: Option<ArbitrageOpportunity> = None;
         
         for triangle in triangles.iter().take(self.max_scan_count) {
             // Pre-filter triangles by liquidity
@@ -111,6 +138,10 @@ impl ArbitrageEngine {
                 test_amount,
                 pair_manager,
             ) {
+                if best_opp.as_ref().map_or(true, |o| opportunity.estimated_profit_pct > o.estimated_profit_pct) {
+                    best_opp = Some(opportunity.clone());
+                }
+
                 if opportunity.estimated_profit_pct >= self.profit_threshold {
                     found_opportunities.push(opportunity);
                 }
@@ -119,7 +150,7 @@ impl ArbitrageEngine {
         }
         
         debug!("Scanned {} triangles for {}", scanned_count, base_currency);
-        (scanned_count, found_opportunities)
+        (scanned_count, found_opportunities, best_opp)
     }
 
     /// Check if triangle meets minimum liquidity requirements

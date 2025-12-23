@@ -32,28 +32,28 @@ impl BalanceManager {
                     debug!("Checking {} account type", account_type);
                     
                     for account in &wallet_result.list {
-                        debug!("Processing account type: {}", account.account_type);
+                        let acct_type = account.account_type.as_deref().unwrap_or("UNKNOWN");
+                        debug!("Processing account type: {}", acct_type);
                         
                         for coin_balance in &account.coin {
                             // Try multiple balance fields
                             let balance_sources = vec![
-                                &coin_balance.wallet_balance,
-                                &coin_balance.available_to_withdraw,
-                                &coin_balance.equity,
+                                ("wallet_balance", &coin_balance.wallet_balance),
+                                ("available_to_withdraw", &coin_balance.available_to_withdraw),
+                                ("equity", &coin_balance.equity),
                             ];
                             
                             let mut found_balance = false;
-                            for balance_field in balance_sources {
-                                if let Ok(balance) = balance_field.parse::<f64>() {
-                                    if balance > 0.0 {
-                                        self.balances.insert(coin_balance.coin.clone(), balance);
-                                        debug!("Added {} balance: {} = {} (from {})", 
-                                               account_type, coin_balance.coin, balance, 
-                                               if balance_field == &coin_balance.wallet_balance { "wallet_balance" }
-                                               else if balance_field == &coin_balance.available_to_withdraw { "available_to_withdraw" }
-                                               else { "equity" });
-                                        found_balance = true;
-                                        break;
+                            for (name, balance_opt) in balance_sources {
+                                if let Some(balance_str) = balance_opt {
+                                    if let Ok(balance) = balance_str.parse::<f64>() {
+                                        if balance > 0.0 {
+                                            self.balances.insert(coin_balance.coin.clone(), balance);
+                                            debug!("Added {} balance: {} = {} (from {})", 
+                                                   account_type, coin_balance.coin, balance, name);
+                                            found_balance = true;
+                                            break;
+                                        }
                                     }
                                 }
                             }
@@ -263,21 +263,21 @@ mod tests {
     fn create_test_coin_balance(coin: &str, available: &str) -> CoinBalance {
         CoinBalance {
             available_to_borrow: None,
-            bonus: "0".to_string(),
-            accrued_interest: "0".to_string(),
-            available_to_withdraw: available.to_string(),
-            total_order_im: "0".to_string(),
-            equity: available.to_string(),
-            total_position_mm: "0".to_string(),
-            usd_value: "0".to_string(),
-            unrealised_pnl: "0".to_string(),
+            bonus: Some("0".to_string()),
+            accrued_interest: Some("0".to_string()),
+            available_to_withdraw: Some(available.to_string()),
+            total_order_im: Some("0".to_string()),
+            equity: Some(available.to_string()),
+            total_position_mm: Some("0".to_string()),
+            usd_value: Some("0".to_string()),
+            unrealised_pnl: Some("0".to_string()),
             collateral_switch: None,
             spot_hedging_qty: None,
-            borrow_amount: "0".to_string(),
-            total_position_im: "0".to_string(),
-            wallet_balance: available.to_string(),
-            cum_realised_pnl: "0".to_string(),
-            locked: "0".to_string(),
+            borrow_amount: Some("0".to_string()),
+            total_position_im: Some("0".to_string()),
+            wallet_balance: Some(available.to_string()),
+            cum_realised_pnl: Some("0".to_string()),
+            locked: Some("0".to_string()),
             margin_collateral: None,
             coin: coin.to_string(),
         }

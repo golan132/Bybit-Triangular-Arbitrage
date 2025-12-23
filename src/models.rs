@@ -31,33 +31,35 @@ impl<T> ApiResponse<T> {
 // Wallet Balance Models
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WalletBalanceResult {
+    #[serde(default)]
     pub list: Vec<WalletAccount>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WalletAccount {
     #[serde(rename = "totalEquity")]
-    pub total_equity: String,
+    pub total_equity: Option<String>,
     #[serde(rename = "accountIMRate")]
     pub account_im_rate: Option<String>,
     #[serde(rename = "totalMarginBalance")]
-    pub total_margin_balance: String,
+    pub total_margin_balance: Option<String>,
     #[serde(rename = "totalInitialMargin")]
-    pub total_initial_margin: String,
+    pub total_initial_margin: Option<String>,
     #[serde(rename = "accountType")]
-    pub account_type: String,
+    pub account_type: Option<String>,
     #[serde(rename = "totalAvailableBalance")]
-    pub total_available_balance: String,
+    pub total_available_balance: Option<String>,
     #[serde(rename = "accountMMRate")]
     pub account_mm_rate: Option<String>,
     #[serde(rename = "totalPerpUPL")]
-    pub total_perp_upl: String,
+    pub total_perp_upl: Option<String>,
     #[serde(rename = "totalWalletBalance")]
-    pub total_wallet_balance: String,
+    pub total_wallet_balance: Option<String>,
     #[serde(rename = "accountLTV")]
     pub account_ltv: Option<String>,
     #[serde(rename = "totalMaintenanceMargin")]
-    pub total_maintenance_margin: String,
+    pub total_maintenance_margin: Option<String>,
+    #[serde(default)]
     pub coin: Vec<CoinBalance>,
 }
 
@@ -66,35 +68,35 @@ pub struct CoinBalance {
     #[serde(rename = "availableToBorrow")]
     pub available_to_borrow: Option<String>,
     #[serde(rename = "bonus")]
-    pub bonus: String,
+    pub bonus: Option<String>,
     #[serde(rename = "accruedInterest")]
-    pub accrued_interest: String,
+    pub accrued_interest: Option<String>,
     #[serde(rename = "availableToWithdraw")]
-    pub available_to_withdraw: String,
+    pub available_to_withdraw: Option<String>,
     #[serde(rename = "totalOrderIM")]
-    pub total_order_im: String,
+    pub total_order_im: Option<String>,
     #[serde(rename = "equity")]
-    pub equity: String,
+    pub equity: Option<String>,
     #[serde(rename = "totalPositionMM")]
-    pub total_position_mm: String,
+    pub total_position_mm: Option<String>,
     #[serde(rename = "usdValue")]
-    pub usd_value: String,
+    pub usd_value: Option<String>,
     #[serde(rename = "unrealisedPnl")]
-    pub unrealised_pnl: String,
+    pub unrealised_pnl: Option<String>,
     #[serde(rename = "collateralSwitch")]
     pub collateral_switch: Option<bool>,
     #[serde(rename = "spotHedgingQty")]
     pub spot_hedging_qty: Option<String>,
     #[serde(rename = "borrowAmount")]
-    pub borrow_amount: String,
+    pub borrow_amount: Option<String>,
     #[serde(rename = "totalPositionIM")]
-    pub total_position_im: String,
+    pub total_position_im: Option<String>,
     #[serde(rename = "walletBalance")]
-    pub wallet_balance: String,
+    pub wallet_balance: Option<String>,
     #[serde(rename = "cumRealisedPnl")]
-    pub cum_realised_pnl: String,
+    pub cum_realised_pnl: Option<String>,
     #[serde(rename = "locked")]
-    pub locked: String,
+    pub locked: Option<String>,
     #[serde(rename = "marginCollateral")]
     pub margin_collateral: Option<bool>,
     pub coin: String,
@@ -194,27 +196,27 @@ pub struct TickersResult {
 pub struct TickerInfo {
     pub symbol: String,
     #[serde(rename = "lastPrice")]
-    pub last_price: String,
+    pub last_price: Option<String>,
     #[serde(rename = "indexPrice")]
     pub index_price: Option<String>,
     #[serde(rename = "markPrice")]
     pub mark_price: Option<String>,
     #[serde(rename = "prevPrice24h")]
-    pub prev_price_24h: String,
+    pub prev_price_24h: Option<String>,
     #[serde(rename = "price24hPcnt")]
-    pub price_24h_pcnt: String,
+    pub price_24h_pcnt: Option<String>,
     #[serde(rename = "highPrice24h")]
-    pub high_price_24h: String,
+    pub high_price_24h: Option<String>,
     #[serde(rename = "lowPrice24h")]
-    pub low_price_24h: String,
+    pub low_price_24h: Option<String>,
     #[serde(rename = "prevPrice1h")]
     pub prev_price_1h: Option<String>,
     #[serde(rename = "openInterest")]
     pub open_interest: Option<String>,
     #[serde(rename = "openInterestValue")]
     pub open_interest_value: Option<String>,
-    pub turnover24h: String,
-    pub volume24h: String,
+    pub turnover24h: Option<String>,
+    pub volume24h: Option<String>,
     #[serde(rename = "fundingRate")]
     pub funding_rate: Option<String>,
     #[serde(rename = "nextFundingTime")]
@@ -228,13 +230,13 @@ pub struct TickerInfo {
     #[serde(rename = "deliveryTime")]
     pub delivery_time: Option<String>,
     #[serde(rename = "ask1Size")]
-    pub ask1_size: String,
+    pub ask1_size: Option<String>,
     #[serde(rename = "bid1Price")]
-    pub bid1_price: String,
+    pub bid1_price: Option<String>,
     #[serde(rename = "ask1Price")]
-    pub ask1_price: String,
+    pub ask1_price: Option<String>,
     #[serde(rename = "bid1Size")]
-    pub bid1_size: String,
+    pub bid1_size: Option<String>,
     pub basis: Option<String>,
 }
 
@@ -348,13 +350,13 @@ impl MarketPair {
             .unwrap_or(0.0);
 
         // Parse prices from ticker
-        let price = ticker.last_price.parse().ok()?;
-        let bid_price = ticker.bid1_price.parse().ok()?;
-        let ask_price = ticker.ask1_price.parse().ok()?;
-        let bid_size = ticker.bid1_size.parse().ok().unwrap_or(0.0);
-        let ask_size = ticker.ask1_size.parse().ok().unwrap_or(0.0);
-        let volume_24h = ticker.volume24h.parse().ok().unwrap_or(0.0);
-        let turnover_24h = ticker.turnover24h.parse().ok().unwrap_or(0.0);
+        let price = ticker.last_price.as_ref().and_then(|s| s.parse().ok())?;
+        let bid_price = ticker.bid1_price.as_ref().and_then(|s| s.parse().ok())?;
+        let ask_price = ticker.ask1_price.as_ref().and_then(|s| s.parse().ok())?;
+        let bid_size = ticker.bid1_size.as_ref().and_then(|s| s.parse().ok()).unwrap_or(0.0);
+        let ask_size = ticker.ask1_size.as_ref().and_then(|s| s.parse().ok()).unwrap_or(0.0);
+        let volume_24h = ticker.volume24h.as_ref().and_then(|s| s.parse().ok()).unwrap_or(0.0);
+        let turnover_24h = ticker.turnover24h.as_ref().and_then(|s| s.parse().ok()).unwrap_or(0.0);
 
         // Calculate spread percentage
         let spread_percent = if bid_price > 0.0 && ask_price > 0.0 {

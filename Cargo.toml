@@ -22,6 +22,9 @@ sha2 = "0.10"
 hex = "0.4"
 rayon = "1.11.0"
 simd-json = { version = "0.13", features = ["serde_impl"] }
+tokio-tungstenite = { version = "0.28.0", features = ["native-tls"] }
+futures-util = "0.3.31"
+url = "2.5.7"
 
 [dev-dependencies]
 mockito = "1.0"

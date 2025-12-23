@@ -7,6 +7,7 @@ mod models;
 mod pairs;
 mod precision;
 mod trader;
+mod websocket;
 
 use anyhow::{Context, Result};
 use std::time::Instant;
@@ -21,6 +22,7 @@ use logger::*;
 use pairs::PairManager;
 use precision::PrecisionManager;
 use trader::ArbitrageTrader;
+use websocket::BybitWebsocket;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -83,34 +85,89 @@ async fn main() -> Result<()> {
         info!("🎯 TRADE LIMIT: Bot will execute {} trade(s) and then stop", max_trades);
     }
     
+    // Initial pair fetch to populate symbols
+    log_phase("init", "Fetching initial trading pairs");
+    pair_manager.update_pairs_and_prices(&client).await.context("Failed to fetch initial pairs")?;
+
+    // Setup WebSocket
+    let (tx, mut rx) = tokio::sync::mpsc::channel(10000);
+    
+    // Optimization: Only subscribe to liquid symbols to save bandwidth and connections
+    let all_symbols_count = pair_manager.get_pairs().len();
+    let symbols = pair_manager.get_liquid_symbols();
+    
+    info!("🔌 Optimizing WebSocket: Selected {} liquid symbols out of {} total", symbols.len(), all_symbols_count);
+    
+    if symbols.is_empty() {
+        warn!("⚠️ No liquid symbols found! WebSocket will not subscribe to any pairs.");
+    } else {
+        info!("🔌 Connecting to WebSocket for {} liquid symbols...", symbols.len());
+        
+        // Split symbols into chunks of 100 to respect Bybit's connection limit
+        // Bybit allows max 100 topics per connection
+        const MAX_TOPICS_PER_CONNECTION: usize = 100;
+        let chunks: Vec<Vec<String>> = symbols.chunks(MAX_TOPICS_PER_CONNECTION)
+            .map(|chunk| chunk.to_vec())
+            .collect();
+            
+        info!("🔌 Spawning {} WebSocket connections to handle liquid symbols", chunks.len());
+        
+        for (i, chunk) in chunks.into_iter().enumerate() {
+            let tx_clone = tx.clone();
+            let conn_id = i + 1;
+            info!("🔌 Connection #{}: Managing {} symbols", conn_id, chunk.len());
+            tokio::spawn(BybitWebsocket::new(conn_id, chunk, tx_clone).run());
+            // Add a small delay between connections to avoid rate limits
+            sleep(Duration::from_millis(100)).await;
+        }
+    }
+
     let mut cycle_count = 0;
     let mut initial_scan_logged = false;
     let _trade_executed = false;
     let mut trades_completed = 0u32;
+    let start_time = Instant::now();
+
+    info!("🚀 Bot started. Press Ctrl+C to stop.");
 
     // Main application loop - will exit after reaching max trades
     loop {
-        cycle_count += 1;
-        match run_arbitrage_cycle(&client, &mut balance_manager, &mut pair_manager, &mut arbitrage_engine, &mut trader, &precision_manager, cycle_count, &mut initial_scan_logged, &mut trades_completed, max_trades, min_trade_amount).await {
-            Ok(should_exit) => {
-                if should_exit {
-                    warn!("🎯 TRADE LIMIT REACHED ({}/{}) - Bot stopping as requested", trades_completed, max_trades);
-                    break;
-                }
-                // Only log every 100 cycles to reduce spam
-                if cycle_count % 100 == 0 {
-                    log_success("Status", &format!("Completed {} cycles successfully (Trades: {}/{})", cycle_count, trades_completed, max_trades));
-                }
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {
+                println!(); // Newline
+                info!("🛑 Received Ctrl+C signal. Shutting down...");
+                
+                let duration = start_time.elapsed();
+                info!("📊 Session Summary:");
+                info!("   • Runtime: {:.2?}", duration);
+                info!("   • Total Cycles: {}", cycle_count);
+                info!("   • Trades Executed: {}/{}", trades_completed, max_trades);
+                
+                break;
             }
-            Err(e) => {
-                log_error_with_context("Arbitrage Cycle", &*e);
-                log_warning("Recovery", "Continuing to next cycle after error");
+            res = run_arbitrage_cycle(&client, &mut balance_manager, &mut pair_manager, &mut arbitrage_engine, &mut trader, &precision_manager, cycle_count + 1, &mut initial_scan_logged, &mut trades_completed, max_trades, min_trade_amount, &mut rx) => {
+                cycle_count += 1;
+                match res {
+                    Ok(should_exit) => {
+                        if should_exit {
+                            warn!("🎯 TRADE LIMIT REACHED ({}/{}) - Bot stopping as requested", trades_completed, max_trades);
+                            break;
+                        }
+                        // Only log every 100 cycles to reduce spam
+                        if cycle_count % 100 == 0 {
+                            log_success("Status", &format!("Completed {} cycles successfully (Trades: {}/{})", cycle_count, trades_completed, max_trades));
+                        }
+                    }
+                    Err(e) => {
+                        log_error_with_context("Arbitrage Cycle", &*e);
+                        log_warning("Recovery", "Continuing to next cycle after error");
+                    }
+                }
+                // Run continuously without delay for live arbitrage scanning
+                // Add a small delay to prevent overwhelming the API
+                sleep(Duration::from_millis(500)).await;
             }
         }
-
-        // Run continuously without delay for live arbitrage scanning
-        // Add a small delay to prevent overwhelming the API
-        sleep(Duration::from_millis(500)).await;
     }
     
     // Save precision cache on exit
@@ -133,6 +190,7 @@ async fn run_arbitrage_cycle(
     trades_completed: &mut u32,
     max_trades: u32,
     min_trade_amount: f64,
+    rx: &mut tokio::sync::mpsc::Receiver<crate::models::TickerInfo>,
 ) -> Result<bool> {
     let cycle_start = Instant::now();
     
@@ -191,16 +249,21 @@ async fn run_arbitrage_cycle(
         
         log_pair_statistics(&pair_manager.get_statistics());
     } 
-    // Light refresh (prices only) based on timer
-    else if pair_manager.needs_refresh(config::PRICE_REFRESH_INTERVAL_SECS) {
-        if cycle_count % 50 == 0 {
-            log_phase("pairs", "Refreshing prices (Tickers only)");
+    // Process WebSocket updates for prices
+    else {
+        let mut updates_count = 0;
+        while let Ok(ticker) = rx.try_recv() {
+            pair_manager.update_from_ticker(&ticker);
+            updates_count += 1;
         }
         
-        pair_manager
-            .update_prices(client)
-            .await
-            .context("Failed to update prices")?;
+        if updates_count > 0 {
+            if cycle_count % 10 == 0 {
+                info!("⚡ Processed {} WebSocket ticker updates", updates_count);
+            }
+        } else if cycle_count % 10 == 0 {
+            warn!("⚠️ No WebSocket updates received in this cycle (Check connection/subscription)");
+        }
     }
 
     // Phase 3: Scan for arbitrage opportunities
