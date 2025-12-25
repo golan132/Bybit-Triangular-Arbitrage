@@ -22,6 +22,7 @@ impl PairManager {
         }
     }
 
+    #[allow(dead_code)]
     pub fn get_all_symbols(&self) -> Vec<String> {
         self.pairs.iter().map(|p| p.symbol.clone()).collect()
     }
@@ -391,7 +392,6 @@ impl PairManager {
     }
 
     /// Check if data needs refresh
-
     /// Log pair statistics for debugging
     fn log_pair_statistics(&self) {
         let stats = self.get_statistics();
@@ -540,10 +540,18 @@ mod tests {
             quote: quote.to_string(),
             symbol: symbol.to_string(),
             price,
+            bid_price: price,
+            ask_price: price,
+            bid_size: 1.0,
+            ask_size: 1.0,
+            volume_24h: 1000.0,
+            volume_24h_usd: 1000.0 * price,
+            spread_percent: 0.0,
             min_qty: 0.001,
             qty_step: 0.001,
             min_notional: 1.0,
             is_active: true,
+            is_liquid: true,
         }
     }
 

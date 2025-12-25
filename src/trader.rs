@@ -69,12 +69,12 @@ impl ArbitrageTrader {
             // - Converting USDT → ETH: key "USDTETH" → (ETHUSDT, Buy) - buy ETH using USDT
 
             // Map for direct conversion: FROM(base) -> TO(quote) = Sell base
-            let direct_key = format!("{}{}", base, quote);
+            let direct_key = format!("{base}{quote}");
             self.symbol_map
                 .insert(direct_key.clone(), (symbol.clone(), "Sell".to_string()));
 
             // Map for reverse conversion: FROM(quote) -> TO(base) = Buy base
-            let reverse_key = format!("{}{}", quote, base);
+            let reverse_key = format!("{quote}{base}");
             self.symbol_map
                 .insert(reverse_key.clone(), (symbol.clone(), "Buy".to_string()));
 
@@ -105,10 +105,7 @@ impl ArbitrageTrader {
             return self.simulate_execution(opportunity, amount);
         }
 
-        info!(
-            "🚀 LIVE EXECUTION: Starting arbitrage trade with ${:.2}",
-            amount
-        );
+        info!("🚀 LIVE EXECUTION: Starting arbitrage trade with ${amount:.2}");
         info!(
             "📊 Path: {} → {} → {} → {}",
             opportunity.path[0], opportunity.path[1], opportunity.path[2], opportunity.path[3]
@@ -169,7 +166,7 @@ impl ArbitrageTrader {
                     pair_symbol,
                     trade_amount,
                     confirmed_balance,
-                    &opportunity,
+                    opportunity,
                 )
                 .await
             {
@@ -217,10 +214,7 @@ impl ArbitrageTrader {
                         };
                         dust_value_usd += estimated_value;
 
-                        info!(
-                            "🧹 Leftover dust: {:.8} {} (≈${:.4})",
-                            dust, currency, estimated_value
-                        );
+                        info!("🧹 Leftover dust: {dust:.8} {currency} (≈${estimated_value:.4})");
                     }
 
                     // For each step, calculate what amount we actually have in the target currency
@@ -283,7 +277,7 @@ impl ArbitrageTrader {
                         dust_value_usd,
                         total_fees,
                         execution_time_ms: start_time.elapsed().as_millis() as u64,
-                        error_message: Some(format!("{}: {}", error_category, error_str)),
+                        error_message: Some(format!("{error_category}: {error_str}")),
                     });
                 }
             }
@@ -296,21 +290,16 @@ impl ArbitrageTrader {
         let total_profit_pct_with_dust = (total_profit_with_dust / amount) * 100.0;
 
         warn!("🎯 ARBITRAGE COMPLETED!");
-        warn!("   Initial: ${:.6} → Final: ${:.6}", amount, current_amount);
-        warn!(
-            "   Realized Profit: ${:.6} ({:.2}%)",
-            actual_profit, actual_profit_pct
-        );
+        warn!("   Initial: ${amount:.6} → Final: ${current_amount:.6}");
+        warn!("   Realized Profit: ${actual_profit:.6} ({actual_profit_pct:.2}%)");
         if dust_value_usd > 0.0 {
-            warn!("   Dust Value: ${:.6}", dust_value_usd);
+            warn!("   Dust Value: ${dust_value_usd:.6}");
             warn!(
-                "   Total Profit (inc. Dust): ${:.6} ({:.2}%)",
-                total_profit_with_dust, total_profit_pct_with_dust
+                "   Total Profit (inc. Dust): ${total_profit_with_dust:.6} ({total_profit_pct_with_dust:.2}%)"
             );
         }
-        warn!("   Total fees: ${:.6}", total_fees);
-        warn!("   Execution time: {}ms", execution_time);
-
+        warn!("   Total fees: ${total_fees:.6}");
+        warn!("   Execution time: {execution_time}ms");
         Ok(ArbitrageExecutionResult {
             success: true,
             initial_amount: amount,
@@ -364,8 +353,7 @@ impl ArbitrageTrader {
                                 .unwrap_or(0.0);
                             if available_balance > 0.0 {
                                 debug!(
-                                    "✅ Balance settled: {} {} available (in {})",
-                                    available_balance, required_currency, acct_type
+                                    "✅ Balance settled: {available_balance} {required_currency} available (in {acct_type})"
                                 );
                                 return Ok(available_balance);
                             }
@@ -387,7 +375,7 @@ impl ArbitrageTrader {
         confirmed_balance: Option<f64>,
         opportunity: &ArbitrageOpportunity,
     ) -> Result<TradeExecution> {
-        info!("📈 Step {}: Executing trade on {}", step, symbol);
+        info!("📈 Step {step}: Executing trade on {symbol}");
 
         // Determine trade direction and calculate quantity
         let (side, quantity) = self
@@ -510,20 +498,13 @@ impl ArbitrageTrader {
 
         if available_balance >= required_amount {
             info!(
-                "✅ Balance check passed: {} {} available (need {:.6})",
-                available_balance, required_currency, required_amount
+                "✅ Balance check passed: {available_balance} {required_currency} available (need {required_amount:.6})"
             );
-            return Ok(());
+            Ok(())
         } else {
-            return Err(anyhow::anyhow!(
-                "Insufficient {} balance: have {:.6}, need {:.6} for step {} {} on {}",
-                required_currency,
-                available_balance,
-                required_amount,
-                step,
-                side,
-                symbol
-            ));
+            Err(anyhow::anyhow!(
+                "Insufficient {required_currency} balance: have {available_balance:.6}, need {required_amount:.6} for step {step} {side} on {symbol}"
+            ))
         }
     }
 
@@ -536,10 +517,7 @@ impl ArbitrageTrader {
         opportunity: &ArbitrageOpportunity,
         confirmed_balance: Option<f64>,
     ) -> Result<(String, f64)> {
-        info!(
-            "🔍 Calculating trade parameters for Step {}: {} with amount {:.6}",
-            step, symbol, amount
-        );
+        info!("🔍 Calculating trade parameters for Step {step}: {symbol} with amount {amount:.6}");
 
         // Parse the triangle path to understand trade directions
         let path = &opportunity.path;
@@ -558,8 +536,7 @@ impl ArbitrageTrader {
                 // Step 1: Convert start currency to first intermediate currency
                 let from = &path[0];
                 let to = &path[1];
-                info!("Step 1: Converting {} to {} via {}", from, to, symbol);
-
+                info!("Step 1: Converting {from} to {to} via {symbol}");
                 let (action, qty) = self
                     .determine_trade_action(symbol, from, to, amount)
                     .await?;
@@ -581,8 +558,7 @@ impl ArbitrageTrader {
                 let safe_quantity = (actual_balance * 0.99).min(amount); // Use 99% of available (more conservative)
 
                 info!(
-                    "💰 Available {} balance: {:.8}, using: {:.8}",
-                    from, actual_balance, safe_quantity
+                    "💰 Available {from} balance: {actual_balance:.8}, using: {safe_quantity:.8}"
                 );
 
                 let (action, converted_quantity) = self
@@ -594,8 +570,7 @@ impl ArbitrageTrader {
                 // Step 3: Convert second intermediate back to start currency
                 let from = &path[2];
                 let to = &path[3];
-                info!("Step 3: Converting {} to {} via {}", from, to, symbol);
-
+                info!("Step 3: Converting {from} to {to} via {symbol}");
                 // Use actual available balance
                 let actual_balance = if let Some(bal) = confirmed_balance {
                     bal
@@ -606,8 +581,7 @@ impl ArbitrageTrader {
                 let safe_quantity = actual_balance * 0.99; // Use 99% of available (more conservative)
 
                 info!(
-                    "💰 Available {} balance: {:.8}, using: {:.8} for next step",
-                    from, actual_balance, safe_quantity
+                    "💰 Available {from} balance: {actual_balance:.8}, using: {safe_quantity:.8} for next step"
                 );
 
                 let (action, converted_quantity) = self
@@ -616,11 +590,11 @@ impl ArbitrageTrader {
                 (action, converted_quantity)
             }
             _ => {
-                return Err(anyhow::anyhow!("Invalid step number: {}", step));
+                return Err(anyhow::anyhow!("Invalid step number: {step}"));
             }
         };
 
-        info!("💡 Trade decision: {} {:.6} on {}", side, quantity, symbol);
+        info!("💡 Trade decision: {side} {quantity:.6} on {symbol}");
         Ok((side, quantity))
     }
 
@@ -637,10 +611,7 @@ impl ArbitrageTrader {
         to_currency: &str,
         amount: f64,
     ) -> Result<(String, f64)> {
-        info!(
-            "🧭 Converting {} → {} via {} (amount: {:.6})",
-            from_currency, to_currency, symbol, amount
-        );
+        info!("🧭 Converting {from_currency} → {to_currency} via {symbol} (amount: {amount:.6})");
 
         // First, try the cached mapping approach for speed
         if let Some((mapped_symbol, action)) =
@@ -656,22 +627,16 @@ impl ArbitrageTrader {
                 };
 
                 info!(
-                    "✅ Cached mapping: {} {} on {} (final quantity: {:.8})",
-                    action,
+                    "✅ Cached mapping: {action} {} on {symbol} (final quantity: {final_quantity:.8})",
                     if action == "Sell" {
                         from_currency
                     } else {
                         to_currency
-                    },
-                    symbol,
-                    final_quantity
+                    }
                 );
                 return Ok((action, final_quantity));
             } else {
-                warn!(
-                    "⚠️ Symbol mismatch: expected {}, got {} from cache",
-                    symbol, mapped_symbol
-                );
+                warn!("⚠️ Symbol mismatch: expected {symbol}, got {mapped_symbol} from cache");
             }
         }
 
@@ -679,14 +644,13 @@ impl ArbitrageTrader {
         let precision_info = self
             .precision_manager
             .get_symbol_precision(symbol)
-            .ok_or_else(|| anyhow::anyhow!("Symbol {} not found in precision manager", symbol))?;
+            .ok_or_else(|| anyhow::anyhow!("Symbol {symbol} not found in precision manager"))?;
 
         let base_coin = &precision_info.base_coin;
         let quote_coin = &precision_info.quote_coin;
 
         info!(
-            "🔍 Fallback lookup - Symbol {}: base={}, quote={} | Converting {} → {}",
-            symbol, base_coin, quote_coin, from_currency, to_currency
+            "🔍 Fallback lookup - Symbol {symbol}: base={base_coin}, quote={quote_coin} | Converting {from_currency} → {to_currency}"
         );
 
         // Apply the algorithm from your documentation:
@@ -697,29 +661,20 @@ impl ArbitrageTrader {
         if base_coin == from_currency && quote_coin == to_currency {
             // Symbol format is FROM+TO (e.g., USDCUSDT for USDC→USDT)
             // Action: SELL from_currency (base) to get to_currency (quote)
-            info!(
-                "✅ Direct pair {}: SELL {} to get {}",
-                symbol, from_currency, to_currency
-            );
+            info!("✅ Direct pair {symbol}: SELL {from_currency} to get {to_currency}");
             Ok(("Sell".to_string(), amount))
         } else if base_coin == to_currency && quote_coin == from_currency {
             // Symbol format is TO+FROM (e.g., NOTUSDC for USDC→NOT)
             // Action: BUY to_currency (base) using from_currency (quote)
             // For Buy orders, Bybit expects the quote currency amount (amount to spend)
             info!(
-                "✅ Reverse pair {}: BUY {} using {} (spending: {:.6} {})",
-                symbol, to_currency, from_currency, amount, from_currency
+                "✅ Reverse pair {symbol}: BUY {to_currency} using {from_currency} (spending: {amount:.6} {from_currency})"
             );
             Ok(("Buy".to_string(), amount))
         } else {
-            return Err(anyhow::anyhow!(
-                "Cannot convert {} → {} using symbol {} (base: {}, quote: {})",
-                from_currency,
-                to_currency,
-                symbol,
-                base_coin,
-                quote_coin
-            ));
+            Err(anyhow::anyhow!(
+                "Cannot convert {from_currency} → {to_currency} using symbol {symbol} (base: {base_coin}, quote: {quote_coin})"
+            ))
         }
     }
 
@@ -730,26 +685,20 @@ impl ArbitrageTrader {
         let key = format!("{}{}", from.to_uppercase(), to.to_uppercase());
 
         if let Some((symbol, action)) = self.symbol_map.get(&key) {
-            info!(
-                "🎯 Found mapping {}: {} {} using {}",
-                key,
-                action,
-                if action == "Sell" { from } else { to },
-                symbol
-            );
+            let direction_currency = if action == "Sell" { from } else { to };
+            info!("🎯 Found mapping {key}: {action} {direction_currency} using {symbol}");
             Some((symbol.clone(), action.clone()))
         } else {
-            info!("❌ No mapping found for {} → {} (key: {})", from, to, key);
+            warn!("⚠️ No mapping found for {from} → {to} (key: {key})");
             None
         }
     }
-
     /// Get actual available balance for a currency
     async fn get_actual_balance(&self, currency: &str) -> Result<f64> {
         match self.client.get_wallet_balance(Some("UNIFIED")).await {
             Ok(balance_result) => {
                 if let Some(account) = balance_result.list.first() {
-                    if let Some(coin_balance) = account.coin.iter().find(|c| &c.coin == currency) {
+                    if let Some(coin_balance) = account.coin.iter().find(|c| c.coin == currency) {
                         let balance: f64 = coin_balance
                             .wallet_balance
                             .as_ref()
@@ -764,7 +713,7 @@ impl ArbitrageTrader {
                 }
             }
             Err(e) => {
-                warn!("Failed to get balance for {}: {}", currency, e);
+                warn!("Failed to get balance for {currency}: {e}");
                 Ok(0.0)
             }
         }
@@ -812,7 +761,7 @@ impl ArbitrageTrader {
                 Ok(order) => {
                     match order.order_status.as_str() {
                         "Filled" => {
-                            debug!("✅ Order {} filled", order_id);
+                            debug!("✅ Order {order_id} filled");
 
                             // Quick balance verification instead of blind delay
                             info!("⚡ Verifying balance settlement...");
@@ -821,21 +770,18 @@ impl ArbitrageTrader {
                             return Ok(order);
                         }
                         "PartiallyFilled" => {
-                            debug!("🔄 Order {} partially filled, waiting...", order_id);
+                            debug!("🔄 Order {order_id} partially filled, waiting...");
                         }
                         "Cancelled" | "Rejected" => {
-                            return Err(anyhow::anyhow!(
-                                "Order {} was cancelled/rejected",
-                                order_id
-                            ));
+                            return Err(anyhow::anyhow!("Order {order_id} was cancelled/rejected"));
                         }
                         _ => {
-                            debug!("⏳ Order {} status: {}", order_id, order.order_status);
+                            debug!("⏳ Order {order_id} status: {}", order.order_status);
                         }
                     }
                 }
                 Err(e) => {
-                    warn!("Failed to get order status: {}", e);
+                    warn!("Failed to get order status: {e}");
                 }
             }
 
@@ -880,10 +826,7 @@ impl ArbitrageTrader {
     ) -> Result<crate::models::PlaceOrderResult> {
         // First try with cached working decimals if available
         if let Some(cached_decimals) = self.precision_manager.get_cached_decimals(symbol) {
-            info!(
-                "🎯 Using cached decimals for {}: {} decimals",
-                symbol, cached_decimals
-            );
+            info!("🎯 Using cached decimals for {symbol}: {cached_decimals} decimals");
             let formatted_quantity = self
                 .precision_manager
                 .format_quantity_smart(symbol, quantity);
@@ -944,7 +887,7 @@ impl ArbitrageTrader {
                     .precision_manager
                     .validate_quantity(symbol, actual_quantity)
                 {
-                    return Err(anyhow::anyhow!("Quantity validation failed: {}", e));
+                    return Err(anyhow::anyhow!("Quantity validation failed: {e}"));
                 }
             }
 
@@ -962,13 +905,12 @@ impl ArbitrageTrader {
                     self.precision_manager
                         .validate_order_value(symbol, order_value, 1.0)
                 {
-                    return Err(anyhow::anyhow!("Order value validation failed: {}", e));
+                    return Err(anyhow::anyhow!("Order value validation failed: {e}"));
                 }
             }
 
             info!(
-                "📊 Using precision for {}: {:.8} (formatted: {})",
-                symbol, actual_quantity, formatted_quantity
+                "📊 Using precision for {symbol}: {actual_quantity:.8} (formatted: {formatted_quantity})"
             );
 
             // Attempt to place the order
@@ -1036,8 +978,8 @@ impl ArbitrageTrader {
                         }
                     } else {
                         // Different error, don't retry
-                        error!("Failed to place order on {}: {}", symbol, e);
-                        return Err(anyhow::anyhow!("Order placement failed: {}", error_str));
+                        error!("Failed to place order on {symbol}: {e}");
+                        return Err(anyhow::anyhow!("Order placement failed: {error_str}"));
                     }
                 }
             }
@@ -1054,7 +996,7 @@ impl ArbitrageTrader {
         formatted_quantity: &str,
         step: usize,
     ) -> Result<crate::models::PlaceOrderResult> {
-        let order_link_id = format!("arb_{}_{}", Uuid::new_v4().simple(), step);
+        let order_link_id = format!("arb_{}_{step}", Uuid::new_v4().simple());
 
         // Create market order for immediate execution
         let order_request = PlaceOrderRequest {
@@ -1070,8 +1012,8 @@ impl ArbitrageTrader {
         };
 
         info!(
-            "Placing {} order: {} {} @ {:?}",
-            side, formatted_quantity, symbol, order_request.price
+            "Placing {side} order: {formatted_quantity} {symbol} @ {:?}",
+            order_request.price
         );
 
         self.client.place_order(order_request).await

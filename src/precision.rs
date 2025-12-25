@@ -105,7 +105,7 @@ impl PrecisionManager {
             // If both fail, use coin-based heuristics instead of defaulting to 8
             let mut qty_precision = self
                 .extract_precision_from_step(&qty_step_str)
-                .or_else(|| self.extract_precision_from_step(&min_qty_str.map(|s| s)))
+                .or_else(|| self.extract_precision_from_step(&min_qty_str))
                 .unwrap_or_else(|| {
                     // Fallback to coin precision heuristics
                     self.get_coin_precision_heuristic(&instrument.base_coin)
@@ -201,7 +201,7 @@ impl PrecisionManager {
             if let Ok(step_value) = step.parse::<f64>() {
                 if step_value > 0.0 {
                     // Count decimal places
-                    let step_str = format!("{:.10}", step_value);
+                    let step_str = format!("{step_value:.10}");
                     if let Some(decimal_pos) = step_str.find('.') {
                         let decimal_part = &step_str[decimal_pos + 1..];
                         let precision = decimal_part.trim_end_matches('0').len() as u32;
@@ -411,10 +411,10 @@ impl PrecisionManager {
             let max_decimals = info.qty_precision.min(8);
             let factor = 10_f64.powi(max_decimals as i32);
             let truncated = (adjusted_quantity * factor).floor() / factor;
-            format!("{:.prec$}", truncated, prec = max_decimals as usize)
+            format!("{truncated:.prec$}", prec = max_decimals as usize)
         } else {
             // Ultimate fallback
-            format!("{:.6}", quantity)
+            format!("{quantity:.6}")
         }
     }
 

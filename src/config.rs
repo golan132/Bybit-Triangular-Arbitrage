@@ -163,6 +163,9 @@ mod tests {
             testnet: false,
             request_timeout_secs: 30,
             max_retries: 3,
+            order_size: 10.0,
+            min_profit_threshold: 0.05,
+            trading_fee_rate: 0.001,
         };
 
         assert_eq!(

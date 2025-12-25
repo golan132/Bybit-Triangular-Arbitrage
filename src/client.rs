@@ -179,7 +179,7 @@ impl BybitClient {
         let acc_type = account_type.unwrap_or("UNIFIED");
         debug!("Fetching wallet balance for account type: {}", acc_type);
 
-        let query_params = format!("accountType={}", acc_type);
+        let query_params = format!("accountType={acc_type}");
 
         let result = self
             .signed_request::<WalletBalanceResult>(
@@ -204,9 +204,9 @@ impl BybitClient {
     ) -> Result<InstrumentsInfoResult> {
         info!("Fetching instruments info for category: {}", category);
 
-        let mut query_params = format!("category={}", category);
+        let mut query_params = format!("category={category}");
         if let Some(lmt) = limit {
-            query_params.push_str(&format!("&limit={}", lmt));
+            query_params.push_str(&format!("&limit={lmt}"));
         }
 
         let result = self
@@ -235,7 +235,7 @@ impl BybitClient {
         loop {
             let mut query_params = "category=spot&limit=1000".to_string();
             if let Some(ref c) = cursor {
-                query_params.push_str(&format!("&cursor={}", c));
+                query_params.push_str(&format!("&cursor={c}"));
             }
 
             debug!("Fetching page {} of instruments", page);
@@ -273,7 +273,7 @@ impl BybitClient {
     pub async fn get_tickers(&self, category: &str) -> Result<TickersResult> {
         debug!("Fetching tickers for category: {}", category);
 
-        let query_params = format!("category={}", category);
+        let query_params = format!("category={category}");
 
         let result = self
             .public_request::<TickersResult>(&self.config.tickers_endpoint(), &query_params)
@@ -291,7 +291,7 @@ impl BybitClient {
     pub async fn get_ticker(&self, category: &str, symbol: &str) -> Result<TickersResult> {
         debug!("Fetching ticker for symbol: {}", symbol);
 
-        let query_params = format!("category={}&symbol={}", category, symbol);
+        let query_params = format!("category={category}&symbol={symbol}");
 
         let result = self
             .public_request::<TickersResult>(&self.config.tickers_endpoint(), &query_params)
@@ -381,10 +381,7 @@ impl BybitClient {
     ) -> Result<crate::models::OrderInfo> {
         debug!("Getting order info: {}", order_id);
 
-        let query_params = format!(
-            "category={}&orderId={}&symbol={}",
-            category, order_id, symbol
-        );
+        let query_params = format!("category={category}&orderId={order_id}&symbol={symbol}");
 
         let endpoint = format!("{}/v5/order/realtime", self.config.base_url);
 
@@ -425,7 +422,6 @@ impl BybitClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mockito;
 
     fn create_test_config() -> Config {
         Config {
@@ -435,6 +431,9 @@ mod tests {
             testnet: true,
             request_timeout_secs: 30,
             max_retries: 3,
+            order_size: 100.0,
+            min_profit_threshold: 0.5,
+            trading_fee_rate: 0.001,
         }
     }
 

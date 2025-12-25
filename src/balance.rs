@@ -29,11 +29,11 @@ impl BalanceManager {
         for account_type in account_types {
             match client.get_wallet_balance(Some(account_type)).await {
                 Ok(wallet_result) => {
-                    debug!("Checking {} account type", account_type);
+                    debug!("Checking {account_type} account type");
 
                     for account in &wallet_result.list {
                         let acct_type = account.account_type.as_deref().unwrap_or("UNKNOWN");
-                        debug!("Processing account type: {}", acct_type);
+                        debug!("Processing account type: {acct_type}");
 
                         for coin_balance in &account.coin {
                             // Try multiple balance fields
@@ -51,8 +51,8 @@ impl BalanceManager {
                                             self.balances
                                                 .insert(coin_balance.coin.clone(), balance);
                                             debug!(
-                                                "Added {} balance: {} = {} (from {})",
-                                                account_type, coin_balance.coin, balance, name
+                                                "Added {account_type} balance: {} = {balance} (from {name})",
+                                                coin_balance.coin
                                             );
                                             found_balance = true;
                                             break;
@@ -63,15 +63,15 @@ impl BalanceManager {
 
                             if !found_balance {
                                 debug!(
-                                    "No positive balance found for {} in {}",
-                                    coin_balance.coin, account_type
+                                    "No positive balance found for {} in {account_type}",
+                                    coin_balance.coin
                                 );
                             }
                         }
                     }
                 }
                 Err(e) => {
-                    warn!("Failed to fetch {} balance: {}", account_type, e);
+                    warn!("Failed to fetch {account_type} balance: {e}");
                 }
             }
         }
@@ -127,7 +127,7 @@ impl BalanceManager {
         for (coin, balance) in &self.balances {
             if *balance > 0.001 {
                 // Only log significant balances
-                info!("  {} = {:.6}", coin, balance);
+                info!("  {coin} = {balance:.6}");
             }
         }
     }
@@ -163,26 +163,22 @@ impl BalanceManager {
         }
 
         info!(
-            "🔍 Account Scanning: Found {} total assets, {} with sufficient balance (>${:.0})",
+            "🔍 Account Scanning: Found {} total assets, {} with sufficient balance (>${min_trade_amount:.0})",
             all_coins.len(),
-            sufficient_coins.len(),
-            min_trade_amount
+            sufficient_coins.len()
         );
 
         if !sufficient_coins.is_empty() {
             info!("✅ Assets available for trading:");
             for (coin, balance, usd_value) in &sufficient_coins {
-                info!("   {} (balance: {:.6}, ~${:.2})", coin, balance, usd_value);
+                info!("   {coin} (balance: {balance:.6}, ~${usd_value:.2})");
             }
         }
 
         if !insufficient_coins.is_empty() {
-            info!(
-                "❌ Assets with insufficient balance (below ${:.0}):",
-                min_trade_amount
-            );
+            info!("❌ Assets with insufficient balance (below ${min_trade_amount:.0}):");
             for (coin, balance, usd_value) in &insufficient_coins {
-                info!("   {} (balance: {:.6}, ~${:.2})", coin, balance, usd_value);
+                info!("   {coin} (balance: {balance:.6}, ~${usd_value:.2})");
             }
         }
 
@@ -274,6 +270,7 @@ mod tests {
     use super::*;
     use crate::models::CoinBalance;
 
+    #[allow(dead_code)]
     fn create_test_coin_balance(coin: &str, available: &str) -> CoinBalance {
         CoinBalance {
             available_to_borrow: None,
