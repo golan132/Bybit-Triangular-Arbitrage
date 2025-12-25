@@ -27,6 +27,18 @@ runs:
     - name: Setup OCI Config and Environment
       shell: bash
       run: |
+        # 0. Install OCI CLI
+        if ! command -v oci &> /dev/null; then
+            echo "Installing OCI CLI..."
+            curl -L -O https://raw.githubusercontent.com/oracle/oci-cli/master/scripts/install/install.sh
+            chmod +x install.sh
+            ./install.sh --accept-all-defaults --exec-dir $HOME/bin
+            echo "$HOME/bin" >> $GITHUB_PATH
+            rm install.sh
+        else
+            echo "OCI CLI already installed."
+        fi
+
         # 1. Create the Private Key File
         mkdir -p $HOME/.oci
         echo "${{ inputs.oci_private_key }}" > $HOME/.oci/oci_api_key.pem
