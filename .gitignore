@@ -8,6 +8,13 @@
 **/*.rs.bk
 Cargo.lock
 
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfplan
+*.tfr
+
 # IDE
 .vscode/
 .idea/
