@@ -52,7 +52,7 @@ impl BybitWebsocket {
                     let mut subscribed_count = 0;
                     for chunk in self.symbols.chunks(10) {
                         let args: Vec<String> =
-                            chunk.iter().map(|s| format!("tickers.{}", s)).collect();
+                            chunk.iter().map(|s| format!("tickers.{s}")).collect();
                         let subscribe_msg = serde_json::json!({
                             "op": "subscribe",
                             "args": args
@@ -62,7 +62,7 @@ impl BybitWebsocket {
                             .send(Message::Text(subscribe_msg.to_string().into()))
                             .await
                         {
-                            error!("Failed to send subscription: {}", e);
+                            error!("Failed to send subscription: {e}");
                             break;
                         }
                         subscribed_count += chunk.len();
@@ -81,7 +81,7 @@ impl BybitWebsocket {
                             _ = ping_interval.tick() => {
                                 let ping_msg = serde_json::json!({ "op": "ping" });
                                 if let Err(e) = write.send(Message::Text(ping_msg.to_string().into())).await {
-                                    error!("Failed to send ping: {}", e);
+                                    error!("Failed to send ping: {e}");
                                     break;
                                 }
                             }
@@ -92,7 +92,7 @@ impl BybitWebsocket {
                                             Ok(response) => {
                                                 if let Some(data) = response.data {
                                                     if let Err(e) = self.sender.send(data).await {
-                                                        error!("Failed to send ticker update: {}", e);
+                                                        error!("Failed to send ticker update: {e}");
                                                         break;
                                                     }
                                                 } else if let Some(success) = response.success {
@@ -106,7 +106,7 @@ impl BybitWebsocket {
                                             Err(e) => {
                                                 // Only log error if it's not a simple pong or success message we failed to parse fully
                                                 if !text.contains("pong") && !text.contains("subscribe") {
-                                                    warn!("Failed to parse WS message: {} | Text: {}", e, text);
+                                                    warn!("Failed to parse WS message: {e} | Text: {text}");
                                                 }
                                             }
                                         }
@@ -116,7 +116,7 @@ impl BybitWebsocket {
                                         break;
                                     }
                                     Some(Err(e)) => {
-                                        error!("WebSocket error: {}", e);
+                                        error!("WebSocket error: {e}");
                                         break;
                                     }
                                     None => {
@@ -130,7 +130,7 @@ impl BybitWebsocket {
                     }
                 }
                 Err(e) => {
-                    error!("Failed to connect to WebSocket: {}", e);
+                    error!("Failed to connect to WebSocket: {e}");
                 }
             }
 

@@ -35,6 +35,11 @@ impl ArbitrageEngine {
         }
     }
 
+    #[cfg(test)]
+    pub fn get_opportunities(&self) -> &Vec<ArbitrageOpportunity> {
+        &self.opportunities
+    }
+
     /// Scan for triangular arbitrage opportunities with minimum trade amount filtering
     pub fn scan_opportunities_with_min_amount(
         &mut self,
@@ -89,7 +94,7 @@ impl ArbitrageEngine {
             if let Some(best) = best_in_coin {
                 if cycle_best
                     .as_ref()
-                    .map_or(true, |o| best.estimated_profit_pct > o.estimated_profit_pct)
+                    .is_none_or(|o| best.estimated_profit_pct > o.estimated_profit_pct)
                 {
                     cycle_best = Some(best);
                 }
@@ -98,9 +103,11 @@ impl ArbitrageEngine {
 
         // Update global best
         if let Some(ref current) = cycle_best {
-            if self.global_best.as_ref().map_or(true, |g| {
-                current.estimated_profit_pct > g.estimated_profit_pct
-            }) {
+            if self
+                .global_best
+                .as_ref()
+                .is_none_or(|g| current.estimated_profit_pct > g.estimated_profit_pct)
+            {
                 self.global_best = Some(current.clone());
             }
         }
@@ -158,7 +165,7 @@ impl ArbitrageEngine {
 
         for triangle in triangles.iter().take(self.max_scan_count) {
             // Pre-filter triangles by liquidity
-            if !self.is_triangle_liquid_enough(&triangle, pair_manager, test_amount) {
+            if !self.is_triangle_liquid_enough(triangle, pair_manager, test_amount) {
                 scanned_count += 1;
                 continue;
             }
@@ -166,9 +173,10 @@ impl ArbitrageEngine {
             if let Some(opportunity) =
                 self.calculate_arbitrage_profit(triangle, test_amount, pair_manager)
             {
-                if best_opp.as_ref().map_or(true, |o| {
-                    opportunity.estimated_profit_pct > o.estimated_profit_pct
-                }) {
+                if best_opp
+                    .as_ref()
+                    .is_none_or(|o| opportunity.estimated_profit_pct > o.estimated_profit_pct)
+                {
                     best_opp = Some(opportunity.clone());
                 }
 
@@ -257,7 +265,7 @@ impl ArbitrageEngine {
         let mut prices = Vec::with_capacity(3);
 
         // Use a reasonable test amount (10% of balance or $100 equivalent)
-        let test_amount = (initial_amount * 0.1).min(100.0).max(1.0);
+        let test_amount = (initial_amount * 0.1).clamp(1.0, 100.0);
         let mut current_amount = test_amount;
 
         // Simulate the trades through the triangle using realistic bid/ask prices
@@ -437,16 +445,25 @@ mod tests {
     use crate::models::MarketPair;
     use crate::pairs::TrianglePairs;
 
+    #[allow(dead_code)]
     fn create_test_triangle() -> TrianglePairs {
         let pair1 = MarketPair {
             base: "BTC".to_string(),
             quote: "USDT".to_string(),
             symbol: "BTCUSDT".to_string(),
             price: 50000.0,
+            bid_price: 50000.0,
+            ask_price: 50000.0,
+            bid_size: 1.0,
+            ask_size: 1.0,
+            volume_24h: 1000.0,
+            volume_24h_usd: 50000000.0,
+            spread_percent: 0.0,
             min_qty: 0.001,
             qty_step: 0.001,
             min_notional: 1.0,
             is_active: true,
+            is_liquid: true,
         };
 
         let pair2 = MarketPair {
@@ -454,10 +471,18 @@ mod tests {
             quote: "BTC".to_string(),
             symbol: "ETHBTC".to_string(),
             price: 0.06, // ETH = 0.06 BTC
+            bid_price: 0.06,
+            ask_price: 0.06,
+            bid_size: 10.0,
+            ask_size: 10.0,
+            volume_24h: 10000.0,
+            volume_24h_usd: 30000000.0,
+            spread_percent: 0.0,
             min_qty: 0.001,
             qty_step: 0.001,
             min_notional: 1.0,
             is_active: true,
+            is_liquid: true,
         };
 
         let pair3 = MarketPair {
@@ -465,10 +490,18 @@ mod tests {
             quote: "USDT".to_string(),
             symbol: "ETHUSDT".to_string(),
             price: 3100.0, // Slightly higher to create arbitrage opportunity
+            bid_price: 3100.0,
+            ask_price: 3100.0,
+            bid_size: 10.0,
+            ask_size: 10.0,
+            volume_24h: 10000.0,
+            volume_24h_usd: 31000000.0,
+            spread_percent: 0.0,
             min_qty: 0.001,
             qty_step: 0.001,
             min_notional: 1.0,
             is_active: true,
+            is_liquid: true,
         };
 
         TrianglePairs {

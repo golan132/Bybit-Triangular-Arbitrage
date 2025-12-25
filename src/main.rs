@@ -55,7 +55,7 @@ async fn main() -> Result<()> {
 
     // Load cached precision data if available
     if let Err(e) = precision_manager.load_cache_from_file("precision_cache.json") {
-        warn!("⚠️ Failed to load precision cache: {}", e);
+        warn!("⚠️ Failed to load precision cache: {e}");
     }
 
     precision_manager
@@ -66,7 +66,7 @@ async fn main() -> Result<()> {
 
     // Display precision cache statistics
     let (total_cached, _) = precision_manager.get_cache_stats();
-    info!("📊 Precision Cache: {} symbols cached", total_cached);
+    info!("📊 Precision Cache: {total_cached} symbols cached");
 
     log_success("Initialization", "Precision data loaded successfully");
 
@@ -81,16 +81,10 @@ async fn main() -> Result<()> {
 
     if dry_run {
         info!("🧪 Running in DRY RUN mode - no actual trades will be executed");
-        info!(
-            "🎯 TRADE LIMIT: Bot will execute {} trade(s) and then stop",
-            max_trades
-        );
+        info!("🎯 TRADE LIMIT: Bot will execute {max_trades} trade(s) and then stop");
     } else {
         info!("🚀 Running in LIVE TRADING mode - real trades will be executed!");
-        info!(
-            "🎯 TRADE LIMIT: Bot will execute {} trade(s) and then stop",
-            max_trades
-        );
+        info!("🎯 TRADE LIMIT: Bot will execute {max_trades} trade(s) and then stop");
     }
 
     // Initial pair fetch to populate symbols
@@ -137,11 +131,7 @@ async fn main() -> Result<()> {
         for (i, chunk) in chunks.into_iter().enumerate() {
             let tx_clone = tx.clone();
             let conn_id = i + 1;
-            info!(
-                "🔌 Connection #{}: Managing {} symbols",
-                conn_id,
-                chunk.len()
-            );
+            info!("🔌 Connection #{conn_id}: Managing {} symbols", chunk.len());
             tokio::spawn(BybitWebsocket::new(conn_id, chunk, tx_clone).run());
             // Add a small delay between connections to avoid rate limits
             sleep(Duration::from_millis(100)).await;
@@ -165,9 +155,9 @@ async fn main() -> Result<()> {
 
                 let duration = start_time.elapsed();
                 info!("📊 Session Summary:");
-                info!("   • Runtime: {:.2?}", duration);
-                info!("   • Total Cycles: {}", cycle_count);
-                info!("   • Trades Executed: {}/{}", trades_completed, max_trades);
+                info!("   • Runtime: {duration:.2?}");
+                info!("   • Total Cycles: {cycle_count}");
+                info!("   • Trades Executed: {trades_completed}/{max_trades}");
 
                 break;
             }
@@ -176,12 +166,12 @@ async fn main() -> Result<()> {
                 match res {
                     Ok(should_exit) => {
                         if should_exit {
-                            warn!("🎯 TRADE LIMIT REACHED ({}/{}) - Bot stopping as requested", trades_completed, max_trades);
+                            warn!("🎯 TRADE LIMIT REACHED ({trades_completed}/{max_trades}) - Bot stopping as requested");
                             break;
                         }
                         // Only log every 100 cycles to reduce spam
                         if cycle_count % 100 == 0 {
-                            log_success("Status", &format!("Completed {} cycles successfully (Trades: {}/{})", cycle_count, trades_completed, max_trades));
+                            log_success("Status", &format!("Completed {cycle_count} cycles successfully (Trades: {trades_completed}/{max_trades})"));
                         }
                     }
                     Err(e) => {
@@ -198,12 +188,13 @@ async fn main() -> Result<()> {
 
     // Save precision cache on exit
     if let Err(e) = trader.get_precision_manager().auto_save_cache() {
-        warn!("⚠️ Failed to save precision cache on exit: {}", e);
+        warn!("⚠️ Failed to save precision cache on exit: {e}");
     }
 
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_arbitrage_cycle(
     client: &BybitClient,
     balance_manager: &mut BalanceManager,
@@ -222,10 +213,7 @@ async fn run_arbitrage_cycle(
 
     // Only log cycle start every 50 cycles to reduce spam
     if cycle_count % 50 == 0 {
-        info!(
-            "🔄 Cycle #{} - Scanning for arbitrage opportunities",
-            cycle_count
-        );
+        info!("🔄 Cycle #{cycle_count} - Scanning for arbitrage opportunities");
     }
 
     // Phase 1: Update account balances
@@ -291,7 +279,7 @@ async fn run_arbitrage_cycle(
 
         if updates_count > 0 {
             if cycle_count % 10 == 0 {
-                info!("⚡ Processed {} WebSocket ticker updates", updates_count);
+                info!("⚡ Processed {updates_count} WebSocket ticker updates");
             }
         } else if cycle_count % 10 == 0 {
             warn!("⚠️ No WebSocket updates received in this cycle (Check connection/subscription)");
@@ -334,6 +322,7 @@ async fn run_arbitrage_cycle(
                         if result.success {
                             *trades_completed += 1; // Only increment on successful trades
                             warn!("✅ TRADE #{} SUCCESS!", *trades_completed);
+                            warn!("✅ TRADE #{trades_completed} SUCCESS!");
                             warn!(
                                 "   Realized Profit: ${:.6} ({:.2}%)",
                                 result.actual_profit, result.actual_profit_pct
@@ -355,24 +344,21 @@ async fn run_arbitrage_cycle(
 
                             // Save precision cache after successful trade
                             if let Err(e) = trader.get_precision_manager().auto_save_cache() {
-                                warn!("⚠️ Failed to save precision cache: {}", e);
+                                warn!("⚠️ Failed to save precision cache: {e}");
                             }
 
                             if *trades_completed >= max_trades {
                                 warn!(
-                                    "🏁 All {} trade(s) completed successfully - stopping bot",
-                                    max_trades
+                                    "🏁 All {max_trades} trade(s) completed successfully - stopping bot"
                                 );
                                 return Ok(true); // Signal to exit the main loop
                             } else {
-                                warn!("⏳ Trade {}/{} completed, continuing to look for next opportunity...", 
-                                      *trades_completed, max_trades);
+                                warn!("⏳ Trade {trades_completed}/{max_trades} completed, continuing to look for next opportunity...");
                             }
-                        } else {
                             let error_msg = result
                                 .error_message
                                 .unwrap_or_else(|| "Unknown error".to_string());
-                            warn!("❌ TRADE FAILED: {}", error_msg);
+                            warn!("❌ TRADE FAILED: {error_msg}");
 
                             // Check if it's a recoverable error (API restrictions, etc.)
                             if error_msg.contains("170348")
@@ -390,7 +376,7 @@ async fn run_arbitrage_cycle(
                     }
                     Err(e) => {
                         let error_str = e.to_string();
-                        warn!("❌ Trade execution error: {}", error_str);
+                        warn!("❌ Trade execution error: {error_str}");
 
                         // Check if it's a recoverable error
                         if error_str.contains("170348")
@@ -406,19 +392,13 @@ async fn run_arbitrage_cycle(
                         info!("🔄 Continuing to scan for other profitable opportunities...");
                     }
                 }
-            } else {
-                if cycle_count % 100 == 0 {
-                    info!("💸 Insufficient USDT balance for trade: ${:.2} (need ${:.2}) - Trades: {}/{}", 
-                          usdt_balance, min_trade_amount, *trades_completed, max_trades);
-                }
+            } else if cycle_count % 100 == 0 {
+                info!("💸 Insufficient USDT balance for trade: ${usdt_balance:.2} (need ${min_trade_amount:.2}) - Trades: {trades_completed}/{max_trades}");
             }
         } else if *trades_completed >= max_trades {
             // All trades completed, just continue scanning until we exit
             if cycle_count % 100 == 0 {
-                info!(
-                    "⏳ All {} trades completed - scanning for exit condition...",
-                    max_trades
-                );
+                info!("⏳ All {max_trades} trades completed - scanning for exit condition...");
             }
         }
     }

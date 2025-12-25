@@ -83,7 +83,7 @@ pub fn log_arbitrage_opportunity(opportunity: &crate::models::ArbitrageOpportuni
         opportunity
             .prices
             .iter()
-            .map(|p| format!("{:.8}", p))
+            .map(|p| format!("{p:.8}"))
             .collect::<Vec<_>>()
             .join(", ")
     );
@@ -164,12 +164,9 @@ pub fn log_performance_metrics(operation: &str, duration_ms: u64, items_processe
             } else {
                 0.0
             };
-            format!(
-                "{} items in {}ms ({:.1} items/sec)",
-                count, duration_ms, rate
-            )
+            format!("{count} items in {duration_ms}ms ({rate:.1} items/sec)")
         }
-        None => format!("completed in {}ms", duration_ms),
+        None => format!("completed in {duration_ms}ms"),
     };
 
     debug!("⚡ {}: {}", operation, performance_msg);
@@ -177,5 +174,4 @@ pub fn log_performance_metrics(operation: &str, duration_ms: u64, items_processe
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 }
