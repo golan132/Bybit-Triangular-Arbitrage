@@ -1,16 +1,16 @@
 name: Build and Push Docker Image
 
-# on:
-#   push:
-#     branches: ["main"]
-#     paths:
-#       - "src/**"
-#       - "Cargo.toml"
-#       - "Cargo.lock"
-#       - "Dockerfile"
-#       - "precision_cache.json"
-#       - ".github/workflows/deploy-project.yml"
-#   workflow_dispatch:
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "Dockerfile"
+      - "precision_cache.json"
+      - ".github/workflows/deploy-project.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
