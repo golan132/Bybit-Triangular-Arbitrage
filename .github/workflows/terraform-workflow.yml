@@ -4,8 +4,8 @@ on:
   push:
     branches: ["main"]
     paths:
-      - 'infrastructure/**'
-      - '.github/workflows/terraform-workflow.yml'
+      - "infrastructure/**"
+      - ".github/workflows/terraform-workflow.yml"
   workflow_dispatch:
 
 permissions:
@@ -16,6 +16,8 @@ jobs:
   plan:
     name: "Terraform Plan"
     runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.ref == 'refs/heads/main' && 'Production' || 'Development' }}
     defaults:
       run:
         working-directory: ./infrastructure
@@ -72,6 +74,8 @@ jobs:
     name: "Wait for Approval"
     needs: plan
     runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.ref == 'refs/heads/main' && 'Production' || 'Development' }}
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
       - name: Manual Approval
@@ -83,9 +87,9 @@ jobs:
           issue-title: "🚀 Approval Required: Deploy to Production"
           issue-body: |
             The Terraform Plan has completed successfully.
-            
+
             Please review the plan in the [Actions logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
-            
+
             Comment **approve** to proceed with the deployment.
             Comment **deny** to cancel.
           exclude-workflow-initiator-as-approver: false
@@ -94,6 +98,8 @@ jobs:
     name: "Terraform Apply"
     needs: approve
     runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.ref == 'refs/heads/main' && 'Production' || 'Development' }}
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     defaults:
       run:
