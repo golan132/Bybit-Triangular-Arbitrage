@@ -212,13 +212,13 @@ async fn run_arbitrage_cycle(
     let cycle_start = Instant::now();
 
     // Only log cycle start every 50 cycles to reduce spam
-    if cycle_count % 50 == 0 {
+    if cycle_count.is_multiple_of(50) {
         info!("🔄 Cycle #{cycle_count} - Scanning for arbitrage opportunities");
     }
 
     // Phase 1: Update account balances
     if balance_manager.needs_refresh(config::BALANCE_REFRESH_INTERVAL_SECS) {
-        if cycle_count % 10 == 0 {
+        if cycle_count.is_multiple_of(10) {
             log_phase("balance", "Refreshing account balances");
         }
         let balance_start = Instant::now();
@@ -234,7 +234,7 @@ async fn run_arbitrage_cycle(
             *initial_scan_logged = true;
         }
 
-        if cycle_count % 10 == 0 {
+        if cycle_count.is_multiple_of(10) {
             log_performance_metrics(
                 "Balance fetch",
                 balance_start.elapsed().as_millis() as u64,
@@ -247,7 +247,7 @@ async fn run_arbitrage_cycle(
 
     // Phase 2: Update trading pairs and prices
     // Full refresh (instruments + prices) every 2000 cycles or if empty
-    let needs_full_refresh = pair_manager.get_pairs().is_empty() || cycle_count % 2000 == 0;
+    let needs_full_refresh = pair_manager.get_pairs().is_empty() || cycle_count.is_multiple_of(2000);
 
     if needs_full_refresh {
         log_phase(
@@ -278,10 +278,10 @@ async fn run_arbitrage_cycle(
         }
 
         if updates_count > 0 {
-            if cycle_count % 10 == 0 {
+            if cycle_count.is_multiple_of(10) {
                 info!("⚡ Processed {updates_count} WebSocket ticker updates");
             }
-        } else if cycle_count % 10 == 0 {
+        } else if cycle_count.is_multiple_of(10) {
             warn!("⚠️ No WebSocket updates received in this cycle (Check connection/subscription)");
         }
     }
@@ -298,7 +298,7 @@ async fn run_arbitrage_cycle(
     // Execute profitable opportunities (only the most profitable one per cycle)
     if let Some(best_opportunity) = opportunities.first() {
         // Only log periodically to avoid spam, even for profitable ones (since we log execution separately)
-        if cycle_count % 10 == 0 {
+        if cycle_count.is_multiple_of(10) {
             log_arbitrage_opportunity(best_opportunity, 1);
         }
 
@@ -392,12 +392,12 @@ async fn run_arbitrage_cycle(
                         info!("🔄 Continuing to scan for other profitable opportunities...");
                     }
                 }
-            } else if cycle_count % 100 == 0 {
+            } else if cycle_count.is_multiple_of(100) {
                 info!("💸 Insufficient USDT balance for trade: ${usdt_balance:.2} (need ${min_trade_amount:.2}) - Trades: {trades_completed}/{max_trades}");
             }
         } else if *trades_completed >= max_trades {
             // All trades completed, just continue scanning until we exit
-            if cycle_count % 100 == 0 {
+            if cycle_count.is_multiple_of(100) {
                 info!("⏳ All {max_trades} trades completed - scanning for exit condition...");
             }
         }
@@ -411,7 +411,7 @@ async fn run_arbitrage_cycle(
     // }
 
     // Only log cycle summary every 300 cycles
-    if cycle_count % crate::config::CYCLE_SUMMARY_INTERVAL as u64 == 0 {
+    if cycle_count.is_multiple_of(crate::config::CYCLE_SUMMARY_INTERVAL as u64) {
         let cycle_duration = cycle_start.elapsed();
         log_performance_metrics(
             "Arbitrage scan",
