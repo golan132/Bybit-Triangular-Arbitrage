@@ -1,9 +1,9 @@
 region = "ap-singapore-1"
 
-# Instance Configuration (Free Tier Limits)
-instance_shape         = "VM.Standard.A1.Flex"
-instance_ocpus         = 4
-instance_memory_in_gbs = 24
+# Instance Configuration (AMD E5 Flex - High Performance)
+instance_shape         = "VM.Standard.E5.Flex"
+instance_ocpus         = 1
+instance_memory_in_gbs = 2
 
 # Note: Sensitive variables must be provided via environment variables (TF_VAR_...)
 # - tenancy_ocid
