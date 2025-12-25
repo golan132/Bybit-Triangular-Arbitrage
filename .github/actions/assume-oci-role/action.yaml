@@ -38,10 +38,18 @@ runs:
     - name: Set Terraform Environment Variables
       shell: bash
       run: |
+        # Terraform Provider Variables
         echo "TF_VAR_tenancy_ocid=${{ inputs.oci_tenancy_ocid }}" >> $GITHUB_ENV
         echo "TF_VAR_user_ocid=${{ inputs.oci_user_ocid }}" >> $GITHUB_ENV
         echo "TF_VAR_fingerprint=${{ inputs.oci_fingerprint }}" >> $GITHUB_ENV
         echo "TF_VAR_region=${{ inputs.oci_region }}" >> $GITHUB_ENV
+        
+        # OCI SDK Variables (Required for Backend Initialization)
+        echo "OCI_CLI_TENANCY=${{ inputs.oci_tenancy_ocid }}" >> $GITHUB_ENV
+        echo "OCI_CLI_USER=${{ inputs.oci_user_ocid }}" >> $GITHUB_ENV
+        echo "OCI_CLI_FINGERPRINT=${{ inputs.oci_fingerprint }}" >> $GITHUB_ENV
+        echo "OCI_CLI_REGION=${{ inputs.oci_region }}" >> $GITHUB_ENV
+        echo "OCI_CLI_KEY_FILE=$GITHUB_WORKSPACE/oci_api_key.pem" >> $GITHUB_ENV
         
         if [ -n "${{ inputs.ssh_public_key }}" ]; then
           echo "TF_VAR_ssh_public_key=${{ inputs.ssh_public_key }}" >> $GITHUB_ENV
