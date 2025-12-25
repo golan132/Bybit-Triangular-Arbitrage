@@ -36,25 +36,9 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Set Environment
-        id: set-env
-        run: |
-          # Determine environment from input or branch
-          TARGET_ENV="${{ inputs.environment }}"
-          if [[ -z "$TARGET_ENV" ]]; then
-            if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-              TARGET_ENV="Production"
-            else
-              TARGET_ENV="Development"
-            fi
-          fi
-          
-          echo "Selected Environment: $TARGET_ENV"
-          
-          if [[ "$TARGET_ENV" == "Production" ]]; then
-            echo "TF_VAR_FILE=environments/prod/prod.tfvars" >> $GITHUB_ENV
-          else
-            echo "TF_VAR_FILE=environments/dev/dev.tfvars" >> $GITHUB_ENV
-          fi
+        uses: ./.github/actions/set-env
+        with:
+          environment: ${{ inputs.environment }}
 
       - name: Setup OCI Credentials
         uses: ./.github/actions/assume-oci-role
@@ -96,8 +80,9 @@ jobs:
     needs: plan
     runs-on: ubuntu-latest
     environment:
-      name: ${{ github.ref == 'refs/heads/main' && 'Production' || 'Development' }}
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      name: ${{ inputs.environment || (github.ref == 'refs/heads/main' && 'Production' || 'Development') }}
+    # Run if it's a push to main OR a manual dispatch
+    if: (github.ref == 'refs/heads/main' && github.event_name == 'push') || github.event_name == 'workflow_dispatch'
     steps:
       - name: Manual Approval
         uses: trstringer/manual-approval@v1
@@ -105,7 +90,7 @@ jobs:
           secret: ${{ secrets.GITHUB_TOKEN }}
           approvers: ${{ github.actor }}
           minimum-approvals: 1
-          issue-title: "🚀 Approval Required: Deploy to Production"
+          issue-title: "🚀 Approval Required: Deploy to ${{ inputs.environment || (github.ref == 'refs/heads/main' && 'Production' || 'Development') }}"
           issue-body: |
             The Terraform Plan has completed successfully.
 
@@ -120,8 +105,9 @@ jobs:
     needs: approve
     runs-on: ubuntu-latest
     environment:
-      name: ${{ github.ref == 'refs/heads/main' && 'Production' || 'Development' }}
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      name: ${{ inputs.environment || (github.ref == 'refs/heads/main' && 'Production' || 'Development') }}
+    # Run if it's a push to main OR a manual dispatch
+    if: (github.ref == 'refs/heads/main' && github.event_name == 'push') || github.event_name == 'workflow_dispatch'
     defaults:
       run:
         working-directory: ./infrastructure
@@ -129,6 +115,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
+
+      - name: Set Environment
+        uses: ./.github/actions/set-env
+        with:
+          environment: ${{ inputs.environment }}
 
       - name: Setup OCI Credentials
         uses: ./.github/actions/assume-oci-role
