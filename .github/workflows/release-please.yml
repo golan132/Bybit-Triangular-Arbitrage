@@ -37,16 +37,15 @@ jobs:
           config-file: release-please-config.json
 
       # Build and upload release artifacts if a release was created
-      - name: Setup Rust
+      - name: Setup Workspace
         if: ${{ steps.release.outputs.release_created }}
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
+        uses: ./.github/actions/setup-workspace
 
       - name: Build Release
         if: ${{ steps.release.outputs.release_created }}
-        run: cargo build --release
+        uses: ./.github/actions/build-project
+        with:
+          release: "true"
 
       - name: Upload Release Assets
         if: ${{ steps.release.outputs.release_created }}

@@ -1,0 +1,132 @@
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Dockerfile'
+      - 'precision_cache.json'
+      - '.github/workflows/deploy-project.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Workspace
+        uses: ./.github/actions/setup-workspace
+
+      - name: Build and Push Docker Image
+        uses: ./.github/actions/build-push-docker
+        with:
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ env.IMAGE_NAME }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+          platforms: linux/arm64
+
+  deploy:
+    name: Deploy to Server
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup OCI Credentials
+        uses: ./.github/actions/assume-oci-role
+        with:
+          oci_private_key: ${{ secrets.OCI_PRIVATE_KEY }}
+          oci_tenancy_ocid: ${{ secrets.OCI_TENANCY_OCID }}
+          oci_user_ocid: ${{ secrets.OCI_USER_OCID }}
+          oci_fingerprint: ${{ secrets.OCI_FINGERPRINT }}
+          oci_region: ${{ secrets.OCI_REGION }}
+
+      - name: Install OCI CLI
+        run: |
+          mkdir -p ~/.oci
+          # The assume-oci-role action creates oci_api_key.pem and sets env vars
+          # We need to create a config file for the CLI to work
+          echo "[DEFAULT]" > ~/.oci/config
+          echo "user=${{ secrets.OCI_USER_OCID }}" >> ~/.oci/config
+          echo "fingerprint=${{ secrets.OCI_FINGERPRINT }}" >> ~/.oci/config
+          echo "key_file=$TF_VAR_private_key_path" >> ~/.oci/config
+          echo "tenancy=${{ secrets.OCI_TENANCY_OCID }}" >> ~/.oci/config
+          echo "region=${{ secrets.OCI_REGION }}" >> ~/.oci/config
+          
+          # Fix permissions
+          chmod 600 ~/.oci/config
+          chmod 600 $TF_VAR_private_key_path
+
+      - name: Get Instance IP
+        id: get-ip
+        run: |
+          # Find the instance by display name (must match what's in your Terraform)
+          INSTANCE_ID=$(oci compute instance list --compartment-id ${{ secrets.OCI_TENANCY_OCID }} --display-name "bybit-bot-instance" --query "data[0].id" --raw-output)
+          
+          if [ "$INSTANCE_ID" == "null" ] || [ -z "$INSTANCE_ID" ]; then
+            echo "Instance not found!"
+            exit 1
+          fi
+          
+          # Get the Public IP from the VNIC
+          VNIC_ID=$(oci compute vnic-attachment list --instance-id $INSTANCE_ID --compartment-id ${{ secrets.OCI_TENANCY_OCID }} --query "data[0].\"vnic-id\"" --raw-output)
+          PUBLIC_IP=$(oci network vnic get --vnic-id $VNIC_ID --query "data.\"public-ip\"" --raw-output)
+          
+          echo "Found Instance IP: $PUBLIC_IP"
+          echo "instance_ip=$PUBLIC_IP" >> $GITHUB_OUTPUT
+
+      - name: Lowercase Repo Name
+        id: repo_name
+        run: |
+          echo "image_name=${GITHUB_REPOSITORY,,}" >> $GITHUB_OUTPUT
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ steps.get-ip.outputs.instance_ip }}
+          username: opc
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            # Login to GHCR
+            echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            
+            # Pull the new image
+            docker pull ghcr.io/${{ steps.repo_name.outputs.image_name }}:latest
+            
+            # Stop and remove old container
+            docker stop bot || true
+            docker rm bot || true
+            
+            # Run new container
+            docker run -d \
+              --name bot \
+              --restart always \
+              --network host \
+              -e BYBIT_API_KEY=${{ secrets.BYBIT_API_KEY }} \
+              -e BYBIT_API_SECRET=${{ secrets.BYBIT_API_SECRET }} \
+              -e BYBIT_TESTNET=${{ vars.BYBIT_TESTNET || 'false' }} \
+              -e DRY_RUN=${{ vars.DRY_RUN || 'true' }} \
+              -e MAX_TRADES=${{ vars.MAX_TRADES || '10' }} \
+              -e ORDER_SIZE=${{ vars.ORDER_SIZE || '10' }} \
+              -e MIN_PROFIT_THRESHOLD=${{ vars.MIN_PROFIT_THRESHOLD || '0.01' }} \
+              -e TRADING_FEE_RATE=${{ vars.TRADING_FEE_RATE || '0.001' }} \
+              -e RUST_LOG=${{ vars.RUST_LOG || 'info' }} \
+              ghcr.io/${{ steps.repo_name.outputs.image_name }}:latest

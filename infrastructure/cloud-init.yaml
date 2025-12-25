@@ -1,0 +1,22 @@
+#cloud-config
+package_update: true
+packages:
+  - yum-utils
+  - git
+
+runcmd:
+  # Install Docker
+  - dnf config-manager --add-repo=https://download.docker.com/linux/centos/docker-ce.repo
+  - dnf install -y docker-ce docker-ce-cli containerd.io
+  - systemctl enable --now docker
+  - usermod -aG docker opc
+
+  # Install Docker Compose
+  - curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+  - chmod +x /usr/local/bin/docker-compose
+
+  # Create project directory
+  - mkdir -p /home/opc/bybit-bot
+  - chown opc:opc /home/opc/bybit-bot
+
+final_message: "The system is finally up, after $UPTIME seconds"

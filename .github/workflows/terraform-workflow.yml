@@ -1,0 +1,128 @@
+name: terraform-workflow
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - 'infrastructure/**'
+      - '.github/workflows/terraform-workflow.yml'
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  plan:
+    name: "Terraform Plan"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./infrastructure
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Set Environment
+        id: set-env
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "TF_VAR_FILE=environments/prod/prod.tfvars" >> $GITHUB_ENV
+          else
+            echo "TF_VAR_FILE=environments/dev/dev.tfvars" >> $GITHUB_ENV
+          fi
+
+      - name: Setup OCI Credentials
+        uses: ./.github/actions/assume-oci-role
+        with:
+          oci_private_key: ${{ secrets.OCI_PRIVATE_KEY }}
+          oci_tenancy_ocid: ${{ secrets.OCI_TENANCY_OCID }}
+          oci_user_ocid: ${{ secrets.OCI_USER_OCID }}
+          oci_fingerprint: ${{ secrets.OCI_FINGERPRINT }}
+          oci_region: ${{ secrets.OCI_REGION }}
+          ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: latest
+
+      - name: Check Terraform Formatting
+        run: |
+          terraform fmt -recursive -check
+
+          if [ $? -ne 0 ]; then
+            echo "Terraform files are not formatted correctly."
+            exit 1
+          else
+            echo "Terraform files are correctly formatted."
+          fi
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Terraform Plan
+        run: terraform plan -var-file="${{ env.TF_VAR_FILE }}"
+
+  approve:
+    name: "Wait for Approval"
+    needs: plan
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Manual Approval
+        uses: trstringer/manual-approval@v1
+        with:
+          secret: ${{ secrets.GITHUB_TOKEN }}
+          approvers: ${{ github.actor }}
+          minimum-approvals: 1
+          issue-title: "🚀 Approval Required: Deploy to Production"
+          issue-body: |
+            The Terraform Plan has completed successfully.
+            
+            Please review the plan in the [Actions logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
+            
+            Comment **approve** to proceed with the deployment.
+            Comment **deny** to cancel.
+          exclude-workflow-initiator-as-approver: false
+
+  apply:
+    name: "Terraform Apply"
+    needs: approve
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    defaults:
+      run:
+        working-directory: ./infrastructure
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup OCI Credentials
+        uses: ./.github/actions/assume-oci-role
+        with:
+          oci_private_key: ${{ secrets.OCI_PRIVATE_KEY }}
+          oci_tenancy_ocid: ${{ secrets.OCI_TENANCY_OCID }}
+          oci_user_ocid: ${{ secrets.OCI_USER_OCID }}
+          oci_fingerprint: ${{ secrets.OCI_FINGERPRINT }}
+          oci_region: ${{ secrets.OCI_REGION }}
+          ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: latest
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Apply
+        uses: ./.github/actions/terraform-apply
+        with:
+          working_directory: ./infrastructure
+          var_file: environments/prod/prod.tfvars

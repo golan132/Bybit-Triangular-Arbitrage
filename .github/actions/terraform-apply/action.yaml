@@ -1,0 +1,19 @@
+name: "Terraform Apply"
+description: "Sets up the Terraform workspace and applies configuration."
+
+inputs:
+  working_directory:
+    description: "The working directory for Terraform."
+    required: true
+    default: "./infrastructure"
+  var_file:
+    description: "Path to the tfvars file."
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Terraform Apply
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: terraform apply -auto-approve -var-file="${{ inputs.var_file }}"

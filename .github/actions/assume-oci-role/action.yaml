@@ -1,0 +1,44 @@
+name: Setup OCI Credentials
+description: Configures OCI credentials and environment variables for Terraform
+
+inputs:
+  oci_private_key:
+    description: 'OCI Private Key content'
+    required: true
+  oci_tenancy_ocid:
+    description: 'OCI Tenancy OCID'
+    required: true
+  oci_user_ocid:
+    description: 'OCI User OCID'
+    required: true
+  oci_fingerprint:
+    description: 'OCI Fingerprint'
+    required: true
+  oci_region:
+    description: 'OCI Region'
+    required: true
+  ssh_public_key:
+    description: 'SSH Public Key'
+    required: false
+
+runs:
+  using: "composite"
+  steps:
+    - name: Create OCI Private Key File
+      shell: bash
+      run: |
+        echo "${{ inputs.oci_private_key }}" > oci_api_key.pem
+        chmod 600 oci_api_key.pem
+        echo "TF_VAR_private_key_path=./oci_api_key.pem" >> $GITHUB_ENV
+
+    - name: Set Terraform Environment Variables
+      shell: bash
+      run: |
+        echo "TF_VAR_tenancy_ocid=${{ inputs.oci_tenancy_ocid }}" >> $GITHUB_ENV
+        echo "TF_VAR_user_ocid=${{ inputs.oci_user_ocid }}" >> $GITHUB_ENV
+        echo "TF_VAR_fingerprint=${{ inputs.oci_fingerprint }}" >> $GITHUB_ENV
+        echo "TF_VAR_region=${{ inputs.oci_region }}" >> $GITHUB_ENV
+        
+        if [ -n "${{ inputs.ssh_public_key }}" ]; then
+          echo "TF_VAR_ssh_public_key=${{ inputs.ssh_public_key }}" >> $GITHUB_ENV
+        fi

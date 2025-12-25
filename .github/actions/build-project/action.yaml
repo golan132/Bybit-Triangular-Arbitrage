@@ -1,0 +1,22 @@
+name: Build Rust Project
+description: Builds the Rust project using Cargo
+
+inputs:
+  release:
+    description: Build in release mode
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Build Project
+      shell: bash
+      run: |
+        if [ "${{ inputs.release }}" == "true" ]; then
+          echo "Building in release mode..."
+          cargo build --release
+        else
+          echo "Building in debug mode..."
+          cargo build
+        fi

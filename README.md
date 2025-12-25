@@ -14,12 +14,14 @@ A high-performance Rust-based triangular arbitrage bot for Bybit cryptocurrency 
 ## Features
 
 ### Core Functionality
+
 - **Real-time Arbitrage Detection**: Continuously scans for profitable triangular arbitrage opportunities
 - **Live Trading Execution**: Automated order placement and execution via Bybit API
 - **Intelligent Filtering**: Liquidity-based filtering to ensure executable opportunities
 - **Risk Management**: Configurable profit thresholds and trade size limits
 
 ### Trading Features
+
 - **Dry Run Mode**: Safe simulation mode for testing strategies
 - **Live Trading Mode**: Actual order execution with real funds
 - **Market Orders**: Immediate execution using market orders with IOC (Immediate or Cancel)
@@ -27,6 +29,7 @@ A high-performance Rust-based triangular arbitrage bot for Bybit cryptocurrency 
 - **Balance Integration**: Automatic balance checks and updates
 
 ### Technical Features
+
 - **High Performance**: 100ms scan cycles for rapid opportunity detection
 - **Realistic Constraints**: Volume filtering ($10K min), spread limits (5% max)
 - **Geographical Compliance**: Excludes problematic tokens (USDR, BUSD, UST, etc.)
@@ -39,6 +42,7 @@ A high-performance Rust-based triangular arbitrage bot for Bybit cryptocurrency 
 - **API Keys**: Generate API keys with trading permissions
 
 ### API Permissions Required
+
 - **Spot Trading**: Place and cancel orders
 - **Wallet**: Read balance information
 - **Read**: Access market data
@@ -46,12 +50,14 @@ A high-performance Rust-based triangular arbitrage bot for Bybit cryptocurrency 
 ## Installation
 
 1. **Clone the repository**:
+
    ```bash
    git clone https://github.com/yourusername/bybit-arbitrage-bot.git
    cd bybit-arbitrage-bot
    ```
 
 2. **Install dependencies**:
+
    ```bash
    cargo build --release
    ```
@@ -114,6 +120,81 @@ MAX_RETRIES=3                   # Maximum API retry attempts
 - **MAX_TRADES**: Limits concurrent arbitrage trades
 - **TRADING_FEE_RATE**: Fee rate used in profit calculations (0.1% = 0.001)
 
+## Infrastructure & Deployment
+
+This project includes a complete DevOps pipeline to deploy the bot to **Oracle Cloud Infrastructure (OCI)** on an **Always Free** ARM instance (`VM.Standard.A1.Flex`).
+
+### 1. GitHub Secrets Setup
+
+Go to **Settings** -> **Secrets and variables** -> **Actions** and add the following secrets:
+
+#### OCI Credentials (for Terraform)
+
+| Secret Name        | Description                                  |
+| ------------------ | -------------------------------------------- |
+| `OCI_TENANCY_OCID` | Your OCI Tenancy OCID                        |
+| `OCI_USER_OCID`    | Your OCI User OCID                           |
+| `OCI_FINGERPRINT`  | Fingerprint of your OCI API Key              |
+| `OCI_PRIVATE_KEY`  | Content of your OCI API Private Key (`.pem`) |
+| `OCI_REGION`       | Your OCI Region (e.g., `eu-frankfurt-1`)     |
+
+#### SSH Access (for Deployment)
+
+Generate an SSH key pair locally: `ssh-keygen -t ed25519 -C "github-actions-deploy" -f "deploy_key" -N ""`
+
+| Secret Name       | Description                                                         |
+| ----------------- | ------------------------------------------------------------------- |
+| `SSH_PUBLIC_KEY`  | Content of `deploy_key.pub` (Used by Terraform to configure the VM) |
+| `SSH_PRIVATE_KEY` | Content of `deploy_key` (Used by GitHub Actions to deploy)          |
+
+#### Application Config (Secrets)
+
+| Secret Name        | Description           |
+| ------------------ | --------------------- |
+| `BYBIT_API_KEY`    | Your Bybit API Key    |
+| `BYBIT_API_SECRET` | Your Bybit API Secret |
+
+#### Runtime Configuration (Variables)
+
+Go to **Settings** -> **Secrets and variables** -> **Actions** -> **Variables** tab to set these:
+
+| Variable Name          | Default | Description                                         |
+| ---------------------- | ------- | --------------------------------------------------- |
+| `DRY_RUN`              | `true`  | Set to `false` to enable real trading               |
+| `BYBIT_TESTNET`        | `false` | Set to `true` to use Bybit Testnet                  |
+| `RUST_LOG`             | `info`  | Logging level (`debug`, `info`, `warn`, `error`)    |
+| `MAX_TRADES`           | `10`    | Maximum number of trades to execute before stopping |
+| `ORDER_SIZE`           | `10`    | Size of each trade in USD                           |
+| `MIN_PROFIT_THRESHOLD` | `0.01`  | Minimum profit percentage required to trade         |
+| `TRADING_FEE_RATE`     | `0.001` | Trading fee rate (0.1% = 0.001)                     |
+
+### 2. Deployment Workflow
+
+The project uses **IssueOps** for infrastructure changes to ensure safety.
+
+#### Infrastructure (Terraform)
+
+1.  **Plan**: When you push to `main`, a Terraform Plan is generated.
+2.  **Approval**: A GitHub Issue is automatically created with the plan details.
+3.  **Apply**: To apply the changes, comment **`approve`** on the issue. The pipeline will resume and create/update the OCI resources.
+
+#### Application (Docker)
+
+1.  **Build**: Once infrastructure is ready, the application is built for ARM64 architecture.
+2.  **Push**: The Docker image is pushed to GitHub Container Registry (GHCR).
+3.  **Deploy**: The workflow connects to the OCI instance via SSH and updates the running container.
+
+### 3. Accessing the Server
+
+To access your running bot instance:
+
+1.  Use the `deploy_key` you generated.
+2.  Find the Instance IP from the OCI Console or GitHub Actions logs.
+3.  Connect via SSH:
+    ```bash
+    ssh -i deploy_key opc@<INSTANCE_IP>
+    ```
+
 ## Usage
 
 ### Dry Run Mode (Recommended First)
@@ -126,6 +207,7 @@ cargo run --release
 ```
 
 The bot will:
+
 - Detect arbitrage opportunities
 - Simulate trade execution
 - Show potential profits
@@ -141,6 +223,7 @@ cargo run --release
 ```
 
 The bot will:
+
 - Execute real trades on Bybit
 - Use your actual account balance
 - Generate real profits/losses
@@ -206,6 +289,7 @@ src/
 ## Safety Features
 
 ### Built-in Protections
+
 - **Dry Run Default**: Starts in simulation mode
 - **Balance Checks**: Verifies funds before trading
 - **Order Timeouts**: Prevents stuck orders
@@ -213,6 +297,7 @@ src/
 - **Comprehensive Logging**: Full audit trail
 
 ### Monitoring
+
 - **Real-time Status**: Live updates on opportunities and trades
 - **Performance Metrics**: Execution times and success rates
 - **Balance Tracking**: Automatic balance updates
@@ -221,17 +306,20 @@ src/
 ## Risk Warnings
 
 ### Market Risks
+
 - **Volatility**: Prices can change rapidly during execution
 - **Slippage**: Actual execution prices may differ from expected
 - **Network Latency**: Delays can affect profitability
 - **Exchange Issues**: API or exchange problems can cause losses
 
 ### Technical Risks
+
 - **API Limits**: Rate limiting may affect performance
 - **Network Connectivity**: Internet issues can disrupt trading
 - **Software Bugs**: Always test thoroughly before live trading
 
 ### Financial Risks
+
 - **Capital Loss**: You can lose money, potentially all of it
 - **Fee Accumulation**: Trading fees reduce profitability
 - **Insufficient Liquidity**: Large orders may not fill completely
@@ -241,11 +329,13 @@ src/
 ### Common Issues
 
 1. **No Opportunities Found**:
+
    - Check market conditions (low volatility periods have fewer opportunities)
    - Verify profit threshold settings
    - Ensure sufficient account balance
 
 2. **API Errors**:
+
    - Verify API key permissions
    - Check API key/secret in .env file
    - Ensure stable internet connection
@@ -266,12 +356,14 @@ RUST_LOG=debug
 ## Performance Optimization
 
 ### Recommended Settings
+
 - **VPS Hosting**: Use a server close to Bybit's location
 - **Stable Connection**: Ensure reliable, low-latency internet
 - **Sufficient Balance**: Maintain adequate funds for opportunities
 - **Conservative Thresholds**: Start with higher profit requirements
 
 ### Hardware Requirements
+
 - **CPU**: Moderate (single core sufficient)
 - **Memory**: 512MB+ RAM
 - **Network**: Low latency, stable connection
