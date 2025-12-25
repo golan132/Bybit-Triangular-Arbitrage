@@ -173,5 +173,4 @@ pub fn log_performance_metrics(operation: &str, duration_ms: u64, items_processe
 }
 
 #[cfg(test)]
-mod tests {
-}
+mod tests {}
