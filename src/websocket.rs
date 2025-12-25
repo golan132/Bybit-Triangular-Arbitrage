@@ -30,7 +30,11 @@ pub struct BybitWebsocket {
 
 impl BybitWebsocket {
     pub fn new(id: usize, symbols: Vec<String>, sender: mpsc::Sender<TickerInfo>) -> Self {
-        Self { id, symbols, sender }
+        Self {
+            id,
+            symbols,
+            sender,
+        }
     }
 
     pub async fn run(self) {
@@ -47,23 +51,31 @@ impl BybitWebsocket {
                     // Bybit allows max 10 args per request. We need to chunk subscriptions.
                     let mut subscribed_count = 0;
                     for chunk in self.symbols.chunks(10) {
-                        let args: Vec<String> = chunk.iter().map(|s| format!("tickers.{}", s)).collect();
+                        let args: Vec<String> =
+                            chunk.iter().map(|s| format!("tickers.{}", s)).collect();
                         let subscribe_msg = serde_json::json!({
                             "op": "subscribe",
                             "args": args
                         });
 
-                        if let Err(e) = write.send(Message::Text(subscribe_msg.to_string().into())).await {
+                        if let Err(e) = write
+                            .send(Message::Text(subscribe_msg.to_string().into()))
+                            .await
+                        {
                             error!("Failed to send subscription: {}", e);
                             break;
                         }
                         subscribed_count += chunk.len();
                     }
-                    info!("[Conn #{}] Subscribed to {} symbols", self.id, subscribed_count);
+                    info!(
+                        "[Conn #{}] Subscribed to {} symbols",
+                        self.id, subscribed_count
+                    );
 
                     // Heartbeat task
-                    let mut ping_interval = tokio::time::interval(Duration::from_secs(PING_INTERVAL));
-                    
+                    let mut ping_interval =
+                        tokio::time::interval(Duration::from_secs(PING_INTERVAL));
+
                     loop {
                         tokio::select! {
                             _ = ping_interval.tick() => {

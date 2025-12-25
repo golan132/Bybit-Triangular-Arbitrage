@@ -245,9 +245,9 @@ pub struct TickerInfo {
 pub struct PlaceOrderRequest {
     pub category: String,
     pub symbol: String,
-    pub side: String,        // "Buy" or "Sell"
+    pub side: String, // "Buy" or "Sell"
     #[serde(rename = "orderType")]
-    pub order_type: String,  // "Market" or "Limit"
+    pub order_type: String, // "Market" or "Limit"
     pub qty: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub price: Option<String>,
@@ -306,12 +306,12 @@ pub struct MarketPair {
     pub base: String,
     pub quote: String,
     pub symbol: String,
-    pub price: f64,      // Keep for backwards compatibility (last_price)
-    pub bid_price: f64,  // Best bid price
-    pub ask_price: f64,  // Best ask price
-    pub bid_size: f64,   // Bid quantity
-    pub ask_size: f64,   // Ask quantity
-    pub volume_24h: f64, // 24h volume in base currency
+    pub price: f64,          // Keep for backwards compatibility (last_price)
+    pub bid_price: f64,      // Best bid price
+    pub ask_price: f64,      // Best ask price
+    pub bid_size: f64,       // Bid quantity
+    pub ask_size: f64,       // Ask quantity
+    pub volume_24h: f64,     // 24h volume in base currency
     pub volume_24h_usd: f64, // 24h volume in USD
     pub spread_percent: f64, // Bid/ask spread percentage
     pub min_qty: f64,
@@ -353,10 +353,26 @@ impl MarketPair {
         let price = ticker.last_price.as_ref().and_then(|s| s.parse().ok())?;
         let bid_price = ticker.bid1_price.as_ref().and_then(|s| s.parse().ok())?;
         let ask_price = ticker.ask1_price.as_ref().and_then(|s| s.parse().ok())?;
-        let bid_size = ticker.bid1_size.as_ref().and_then(|s| s.parse().ok()).unwrap_or(0.0);
-        let ask_size = ticker.ask1_size.as_ref().and_then(|s| s.parse().ok()).unwrap_or(0.0);
-        let volume_24h = ticker.volume24h.as_ref().and_then(|s| s.parse().ok()).unwrap_or(0.0);
-        let turnover_24h = ticker.turnover24h.as_ref().and_then(|s| s.parse().ok()).unwrap_or(0.0);
+        let bid_size = ticker
+            .bid1_size
+            .as_ref()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0.0);
+        let ask_size = ticker
+            .ask1_size
+            .as_ref()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0.0);
+        let volume_24h = ticker
+            .volume24h
+            .as_ref()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0.0);
+        let turnover_24h = ticker
+            .turnover24h
+            .as_ref()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0.0);
 
         // Calculate spread percentage
         let spread_percent = if bid_price > 0.0 && ask_price > 0.0 {
@@ -407,7 +423,7 @@ impl MarketPair {
 // Triangular Arbitrage Opportunity
 #[derive(Debug, Clone)]
 pub struct ArbitrageOpportunity {
-    pub path: Vec<String>, // [USDT, BTC, ETH, USDT]
+    pub path: Vec<String>,  // [USDT, BTC, ETH, USDT]
     pub pairs: Vec<String>, // [BTCUSDT, ETHBTC, ETHUSDT]
     pub prices: Vec<f64>,
     pub estimated_profit_pct: f64,

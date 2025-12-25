@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use tracing::{info, debug};
+use tracing::{debug, info};
 
 #[derive(Debug, Clone)]
 pub struct PrecisionInfo {
@@ -37,13 +37,15 @@ impl PrecisionManager {
     /// Initialize precision data by fetching from Bybit API
     pub async fn initialize(&mut self, client: &BybitClient) -> Result<()> {
         info!("🔍 Fetching precision information for all trading pairs...");
-        
+
         // Fetch spot instruments info
-        let instruments = client.get_instruments_info("spot", Some(1000)).await
+        let instruments = client
+            .get_instruments_info("spot", Some(1000))
+            .await
             .context("Failed to fetch instruments info")?;
-        
+
         self.process_instruments_info(instruments)?;
-        
+
         // Load existing cache if available
         if let Err(e) = self.load_cache_from_file("precision_cache.json") {
             debug!("No existing precision cache found or failed to load: {}", e);
@@ -55,22 +57,29 @@ impl PrecisionManager {
         for (symbol, info) in &self.symbol_precision {
             // If the symbol is not in our cache, add it with the API-derived precision
             if !self.working_decimals_cache.contains_key(symbol) {
-                self.working_decimals_cache.insert(symbol.clone(), info.qty_precision);
+                self.working_decimals_cache
+                    .insert(symbol.clone(), info.qty_precision);
                 new_entries += 1;
             }
         }
-        
+
         if new_entries > 0 {
             info!("♻️  Added {} new symbols to precision cache", new_entries);
             // Save the updated cache immediately to ensure file is up to date
             self.save_cache_to_file("precision_cache.json")?;
         } else {
-            info!("✅ Precision cache is up to date ({} symbols)", self.working_decimals_cache.len());
+            info!(
+                "✅ Precision cache is up to date ({} symbols)",
+                self.working_decimals_cache.len()
+            );
         }
 
-        info!("✅ Precision data loaded for {} symbols and {} coins", 
-              self.symbol_precision.len(), self.coin_precision.len());
-        
+        info!(
+            "✅ Precision data loaded for {} symbols and {} coins",
+            self.symbol_precision.len(),
+            self.coin_precision.len()
+        );
+
         Ok(())
     }
 
@@ -83,12 +92,19 @@ impl PrecisionManager {
                 continue;
             }
 
-            let qty_step_str = instrument.lot_size_filter.as_ref().and_then(|f| f.qty_step.as_ref());
-            let min_qty_str = instrument.lot_size_filter.as_ref().map(|f| &f.min_order_qty);
+            let qty_step_str = instrument
+                .lot_size_filter
+                .as_ref()
+                .and_then(|f| f.qty_step.as_ref());
+            let min_qty_str = instrument
+                .lot_size_filter
+                .as_ref()
+                .map(|f| &f.min_order_qty);
 
             // Try to get precision from qtyStep, fallback to minOrderQty
             // If both fail, use coin-based heuristics instead of defaulting to 8
-            let mut qty_precision = self.extract_precision_from_step(&qty_step_str)
+            let mut qty_precision = self
+                .extract_precision_from_step(&qty_step_str)
                 .or_else(|| self.extract_precision_from_step(&min_qty_str.map(|s| s)))
                 .unwrap_or_else(|| {
                     // Fallback to coin precision heuristics
@@ -102,24 +118,37 @@ impl PrecisionManager {
                 qty_precision = 0;
             }
 
-            let price_precision = self.extract_precision_from_step(&instrument.price_filter.as_ref()
-                .and_then(|f| f.tick_size.as_ref()))
+            let price_precision = self
+                .extract_precision_from_step(
+                    &instrument
+                        .price_filter
+                        .as_ref()
+                        .and_then(|f| f.tick_size.as_ref()),
+                )
                 .unwrap_or(8); // Default to 8 decimals if not found
 
-            let min_order_qty = instrument.lot_size_filter.as_ref()
+            let min_order_qty = instrument
+                .lot_size_filter
+                .as_ref()
                 .map(|f| f.min_order_qty.parse::<f64>().unwrap_or(0.0))
                 .unwrap_or(0.0);
 
-            let max_order_qty = instrument.lot_size_filter.as_ref()
+            let max_order_qty = instrument
+                .lot_size_filter
+                .as_ref()
                 .map(|f| f.max_order_qty.parse::<f64>().unwrap_or(0.0))
                 .unwrap_or(0.0);
 
-            let qty_step = instrument.lot_size_filter.as_ref()
+            let qty_step = instrument
+                .lot_size_filter
+                .as_ref()
                 .and_then(|f| f.qty_step.as_ref())
                 .map(|s| s.parse::<f64>().unwrap_or(0.0))
                 .unwrap_or(0.0);
 
-            let _tick_size = instrument.price_filter.as_ref()
+            let _tick_size = instrument
+                .price_filter
+                .as_ref()
                 .and_then(|f| f.tick_size.as_ref())
                 .map(|s| s.parse::<f64>().unwrap_or(0.0))
                 .unwrap_or(0.0);
@@ -132,23 +161,34 @@ impl PrecisionManager {
                 max_order_qty,
             };
 
-            debug!("📊 {} precision: qty={} decimals, price={} decimals, step={:.8}", 
-                   instrument.symbol, qty_precision, price_precision, qty_step);
+            debug!(
+                "📊 {} precision: qty={} decimals, price={} decimals, step={:.8}",
+                instrument.symbol, qty_precision, price_precision, qty_step
+            );
 
             // Store symbol precision
-            self.symbol_precision.insert(instrument.symbol.clone(), precision_info);
+            self.symbol_precision
+                .insert(instrument.symbol.clone(), precision_info);
 
             // Update coin precision (use the most restrictive precision found)
-            let existing_base_precision = self.coin_precision.get(&instrument.base_coin).copied().unwrap_or(8);
-            let existing_quote_precision = self.coin_precision.get(&instrument.quote_coin).copied().unwrap_or(8);
-            
+            let existing_base_precision = self
+                .coin_precision
+                .get(&instrument.base_coin)
+                .copied()
+                .unwrap_or(8);
+            let existing_quote_precision = self
+                .coin_precision
+                .get(&instrument.quote_coin)
+                .copied()
+                .unwrap_or(8);
+
             self.coin_precision.insert(
-                instrument.base_coin.clone(), 
-                existing_base_precision.min(qty_precision)
+                instrument.base_coin.clone(),
+                existing_base_precision.min(qty_precision),
             );
             self.coin_precision.insert(
-                instrument.quote_coin.clone(), 
-                existing_quote_precision.min(qty_precision)
+                instrument.quote_coin.clone(),
+                existing_quote_precision.min(qty_precision),
             );
         }
 
@@ -178,11 +218,12 @@ impl PrecisionManager {
         match coin {
             "NEAR" | "XRP" | "ADA" | "MATIC" | "DOT" | "EOS" | "XLM" | "SEI" | "SUI" | "FTM" => 2,
             "SOL" | "LTC" | "BCH" | "BNB" | "AVAX" | "LINK" | "UNI" | "AAVE" | "ATOM" => 3,
-            "DOGE" | "TRX" | "SHIB" | "BONK" | "PEPE" | "FLOKI" | "LUNC" | "BOME" | "MEME" | "WIF" => 0,
+            "DOGE" | "TRX" | "SHIB" | "BONK" | "PEPE" | "FLOKI" | "LUNC" | "BOME" | "MEME"
+            | "WIF" => 0,
             "BTC" => 5,
             "ETH" => 4,
             "USDT" | "USDC" | "BUSD" | "DAI" | "FDUSD" => 8,
-            _ => 4 // Default safe value
+            _ => 4, // Default safe value
         }
     }
 
@@ -197,14 +238,18 @@ impl PrecisionManager {
             if quantity < precision_info.min_order_qty {
                 return Err(anyhow::anyhow!(
                     "Quantity {:.8} is below minimum {:.8} for symbol {}",
-                    quantity, precision_info.min_order_qty, symbol
+                    quantity,
+                    precision_info.min_order_qty,
+                    symbol
                 ));
             }
-            
+
             if quantity > precision_info.max_order_qty {
                 return Err(anyhow::anyhow!(
                     "Quantity {:.8} exceeds maximum {:.8} for symbol {}",
-                    quantity, precision_info.max_order_qty, symbol
+                    quantity,
+                    precision_info.max_order_qty,
+                    symbol
                 ));
             }
         }
@@ -214,7 +259,7 @@ impl PrecisionManager {
     /// Validate if order value meets minimum requirements for symbol
     pub fn validate_order_value(&self, symbol: &str, quantity: f64, price: f64) -> Result<()> {
         let order_value = quantity * price;
-        
+
         // Common minimum order values by quote currency
         let min_order_value = if symbol.ends_with("USDT") || symbol.ends_with("USDC") {
             5.0 // $5 minimum for USDT/USDC pairs
@@ -223,14 +268,18 @@ impl PrecisionManager {
         } else {
             1.0 // Default $1 minimum
         };
-        
+
         if order_value < min_order_value {
             return Err(anyhow::anyhow!(
                 "Order value {:.8} is below minimum {:.8} for symbol {} (qty: {:.8}, price: {:.8})",
-                order_value, min_order_value, symbol, quantity, price
+                order_value,
+                min_order_value,
+                symbol,
+                quantity,
+                price
             ));
         }
-        
+
         Ok(())
     }
 
@@ -243,8 +292,11 @@ impl PrecisionManager {
     pub fn print_precision_summary(&self) {
         info!("📊 Precision Summary:");
         info!("   Symbols loaded: {}", self.symbol_precision.len());
-        info!("   Coins with precision data: {}", self.coin_precision.len());
-        
+        info!(
+            "   Coins with precision data: {}",
+            self.coin_precision.len()
+        );
+
         for (coin, precision) in &self.coin_precision {
             debug!("   {}: {} decimals", coin, precision);
         }
@@ -252,7 +304,12 @@ impl PrecisionManager {
 
     /// Format quantity with automatic precision reduction for API compatibility
     /// Starts with 6 decimals max, then reduces based on retry count
-    pub fn format_quantity_with_retry(&self, symbol: &str, quantity: f64, retry_count: u32) -> String {
+    pub fn format_quantity_with_retry(
+        &self,
+        symbol: &str,
+        quantity: f64,
+        retry_count: u32,
+    ) -> String {
         // Aggressive backoff strategy for precision retries
         // 0: 6 decimals (High precision)
         // 1: 4 decimals (Standard crypto)
@@ -264,13 +321,13 @@ impl PrecisionManager {
             1 => 4,
             2 => 2,
             3 => 1,
-            _ => 0
+            _ => 0,
         };
-        
+
         // For insufficient balance retries, also reduce the quantity slightly to ensure we don't hit balance limits
         let adjusted_quantity = if retry_count > 2 {
             // After 2 precision retries, start reducing quantity by 0.5% per retry to avoid balance issues
-            let reduction_factor = 1.0 - (retry_count as f64 - 2.0) * 0.005; 
+            let reduction_factor = 1.0 - (retry_count as f64 - 2.0) * 0.005;
             let new_quantity = quantity * reduction_factor;
             tracing::info!("🔽 Reducing quantity due to balance/precision issues: {:.8} → {:.8} ({:.2}% reduction)", 
                          quantity, new_quantity, (1.0 - reduction_factor) * 100.0);
@@ -278,39 +335,56 @@ impl PrecisionManager {
         } else {
             quantity
         };
-        
+
         if let Some(precision_info) = self.symbol_precision.get(symbol) {
             // Use the smaller of our calculated max_decimals or the symbol's qty_precision
             let actual_decimals = max_decimals.min(precision_info.qty_precision);
             let factor = 10_f64.powi(actual_decimals as i32);
             let truncated = (adjusted_quantity * factor).floor() / factor;
             let formatted = format!("{:.prec$}", truncated, prec = actual_decimals as usize);
-            
+
             if retry_count > 0 {
-                tracing::info!("📏 Precision retry #{} for {}: {} decimals, {:.8} → {} (factor: {})", 
-                             retry_count, symbol, actual_decimals, adjusted_quantity, formatted, factor);
+                tracing::info!(
+                    "📏 Precision retry #{} for {}: {} decimals, {:.8} → {} (factor: {})",
+                    retry_count,
+                    symbol,
+                    actual_decimals,
+                    adjusted_quantity,
+                    formatted,
+                    factor
+                );
             }
-            
+
             formatted
         } else {
             // Fallback: use max_decimals for unknown symbols
             let factor = 10_f64.powi(max_decimals as i32);
             let truncated = (adjusted_quantity * factor).floor() / factor;
             let formatted = format!("{:.prec$}", truncated, prec = max_decimals as usize);
-            
+
             if retry_count > 0 {
-                tracing::info!("📏 Precision retry #{} for {} (unknown symbol): {} decimals, {:.8} → {}", 
-                             retry_count, symbol, max_decimals, adjusted_quantity, formatted);
+                tracing::info!(
+                    "📏 Precision retry #{} for {} (unknown symbol): {} decimals, {:.8} → {}",
+                    retry_count,
+                    symbol,
+                    max_decimals,
+                    adjusted_quantity,
+                    formatted
+                );
             }
-            
+
             formatted
         }
     }
 
     /// Cache the working decimal places for a symbol after successful trade
     pub fn cache_working_decimals(&mut self, symbol: &str, decimals: u32) {
-        info!("💾 Caching working decimals for {}: {} decimals", symbol, decimals);
-        self.working_decimals_cache.insert(symbol.to_string(), decimals);
+        info!(
+            "💾 Caching working decimals for {}: {} decimals",
+            symbol, decimals
+        );
+        self.working_decimals_cache
+            .insert(symbol.to_string(), decimals);
     }
 
     /// Get cached working decimal places for a symbol
@@ -322,7 +396,10 @@ impl PrecisionManager {
     pub fn format_quantity_smart(&self, symbol: &str, quantity: f64) -> String {
         // First try to use cached working decimals
         if let Some(cached_decimals) = self.get_cached_decimals(symbol) {
-            debug!("🎯 Using cached decimals for {}: {} decimals", symbol, cached_decimals);
+            debug!(
+                "🎯 Using cached decimals for {}: {} decimals",
+                symbol, cached_decimals
+            );
             let factor = 10_f64.powi(cached_decimals as i32);
             let truncated = (quantity * factor).floor() / factor;
             return format!("{:.prec$}", truncated, prec = cached_decimals as usize);
@@ -344,7 +421,8 @@ impl PrecisionManager {
     /// Get cache statistics for debugging
     pub fn get_cache_stats(&self) -> (usize, Vec<(String, u32)>) {
         let total_cached = self.working_decimals_cache.len();
-        let mut cached_symbols: Vec<(String, u32)> = self.working_decimals_cache
+        let mut cached_symbols: Vec<(String, u32)> = self
+            .working_decimals_cache
             .iter()
             .map(|(k, v)| (k.clone(), *v))
             .collect();
@@ -356,27 +434,35 @@ impl PrecisionManager {
     pub fn save_cache_to_file(&self, file_path: &str) -> Result<()> {
         let json = serde_json::to_string_pretty(&self.working_decimals_cache)
             .context("Failed to serialize precision cache")?;
-        fs::write(file_path, json)
-            .context("Failed to write precision cache to file")?;
-        info!("💾 Saved precision cache ({} symbols) to {}", self.working_decimals_cache.len(), file_path);
+        fs::write(file_path, json).context("Failed to write precision cache to file")?;
+        info!(
+            "💾 Saved precision cache ({} symbols) to {}",
+            self.working_decimals_cache.len(),
+            file_path
+        );
         Ok(())
     }
 
     /// Load precision cache from file
     pub fn load_cache_from_file(&mut self, file_path: &str) -> Result<()> {
         if !Path::new(file_path).exists() {
-            info!("📁 No precision cache file found at {}, starting with empty cache", file_path);
+            info!(
+                "📁 No precision cache file found at {}, starting with empty cache",
+                file_path
+            );
             return Ok(());
         }
 
-        let json = fs::read_to_string(file_path)
-            .context("Failed to read precision cache file")?;
-        let cache: HashMap<String, u32> = serde_json::from_str(&json)
-            .context("Failed to deserialize precision cache")?;
-        
+        let json = fs::read_to_string(file_path).context("Failed to read precision cache file")?;
+        let cache: HashMap<String, u32> =
+            serde_json::from_str(&json).context("Failed to deserialize precision cache")?;
+
         let loaded_count = cache.len();
         self.working_decimals_cache = cache;
-        info!("📂 Loaded precision cache ({} symbols) from {}", loaded_count, file_path);
+        info!(
+            "📂 Loaded precision cache ({} symbols) from {}",
+            loaded_count, file_path
+        );
         Ok(())
     }
 

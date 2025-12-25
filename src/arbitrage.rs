@@ -1,11 +1,10 @@
 use crate::balance::BalanceManager;
-use crate::config::{MIN_PROFIT_THRESHOLD, MAX_TRIANGLES_TO_SCAN};
+use crate::config::{MAX_TRIANGLES_TO_SCAN, MIN_PROFIT_THRESHOLD};
 use crate::models::ArbitrageOpportunity;
 use crate::pairs::{PairManager, TrianglePairs};
 use chrono::Utc;
-use tracing::debug;
 use rayon::prelude::*;
-
+use tracing::debug;
 
 pub struct ArbitrageEngine {
     opportunities: Vec<ArbitrageOpportunity>,
@@ -45,28 +44,37 @@ impl ArbitrageEngine {
     ) -> Vec<ArbitrageOpportunity> {
         self.opportunities.clear();
         let tradeable_coins = balance_manager.get_tradeable_coins(min_trade_amount);
-        
+
         let coins_to_scan = if tradeable_coins.is_empty() {
             debug!("No tradeable coins with balance >= ${:.0}, scanning popular currencies for reference", min_trade_amount);
             vec![
                 "USDT".to_string(),
-                "BTC".to_string(), 
+                "BTC".to_string(),
                 "ETH".to_string(),
                 "USDC".to_string(),
                 "BNB".to_string(),
             ]
         } else {
-            debug!("Scanning {} tradeable coins: {:?}", tradeable_coins.len(), tradeable_coins);
+            debug!(
+                "Scanning {} tradeable coins: {:?}",
+                tradeable_coins.len(),
+                tradeable_coins
+            );
             tradeable_coins
         };
 
         // Use Rayon for parallel scanning
-        let results: Vec<(usize, Vec<ArbitrageOpportunity>, Option<ArbitrageOpportunity>)> = coins_to_scan.par_iter()
+        let results: Vec<(
+            usize,
+            Vec<ArbitrageOpportunity>,
+            Option<ArbitrageOpportunity>,
+        )> = coins_to_scan
+            .par_iter()
             .map(|base_currency| {
                 let balance = balance_manager.get_balance(base_currency);
                 // Use the minimum trade amount or a portion of balance, whichever is larger
                 let test_amount = min_trade_amount.max((balance * 0.1).min(1000.0));
-                
+
                 self.scan_for_base_currency(base_currency, test_amount, pair_manager)
             })
             .collect();
@@ -77,9 +85,12 @@ impl ArbitrageEngine {
         for (scanned, opps, best_in_coin) in results {
             total_scanned += scanned;
             self.opportunities.extend(opps);
-            
+
             if let Some(best) = best_in_coin {
-                if cycle_best.as_ref().map_or(true, |o| best.estimated_profit_pct > o.estimated_profit_pct) {
+                if cycle_best
+                    .as_ref()
+                    .map_or(true, |o| best.estimated_profit_pct > o.estimated_profit_pct)
+                {
                     cycle_best = Some(best);
                 }
             }
@@ -87,17 +98,29 @@ impl ArbitrageEngine {
 
         // Update global best
         if let Some(ref current) = cycle_best {
-            if self.global_best.as_ref().map_or(true, |g| current.estimated_profit_pct > g.estimated_profit_pct) {
+            if self.global_best.as_ref().map_or(true, |g| {
+                current.estimated_profit_pct > g.estimated_profit_pct
+            }) {
                 self.global_best = Some(current.clone());
             }
         }
 
         // Log best opportunities
         if let Some(best) = &cycle_best {
-             debug!("📉 Cycle Best: {:.4}% via {} (Prices: {:?})", best.estimated_profit_pct, best.display_pairs(), best.prices);
+            debug!(
+                "📉 Cycle Best: {:.4}% via {} (Prices: {:?})",
+                best.estimated_profit_pct,
+                best.display_pairs(),
+                best.prices
+            );
         }
         if let Some(global) = &self.global_best {
-             debug!("🏆 Global Best: {:.4}% via {} (Prices: {:?})", global.estimated_profit_pct, global.display_pairs(), global.prices);
+            debug!(
+                "🏆 Global Best: {:.4}% via {} (Prices: {:?})",
+                global.estimated_profit_pct,
+                global.display_pairs(),
+                global.prices
+            );
         }
 
         // Sort opportunities by profit percentage (highest first)
@@ -108,24 +131,31 @@ impl ArbitrageEngine {
         });
 
         // Only log detailed scan results occasionally
-        debug!("🔁 Found {} potential arbitrage opportunities from {} triangles scanned", 
-              self.opportunities.len(), total_scanned);
+        debug!(
+            "🔁 Found {} potential arbitrage opportunities from {} triangles scanned",
+            self.opportunities.len(),
+            total_scanned
+        );
 
         self.opportunities.clone()
     }
-    
+
     /// Scan for arbitrage opportunities using a specific base currency
     fn scan_for_base_currency(
         &self,
         base_currency: &str,
         test_amount: f64,
         pair_manager: &PairManager,
-    ) -> (usize, Vec<ArbitrageOpportunity>, Option<ArbitrageOpportunity>) {
+    ) -> (
+        usize,
+        Vec<ArbitrageOpportunity>,
+        Option<ArbitrageOpportunity>,
+    ) {
         let triangles = pair_manager.find_triangle_pairs(base_currency);
         let mut scanned_count = 0;
         let mut found_opportunities = Vec::new();
         let mut best_opp: Option<ArbitrageOpportunity> = None;
-        
+
         for triangle in triangles.iter().take(self.max_scan_count) {
             // Pre-filter triangles by liquidity
             if !self.is_triangle_liquid_enough(&triangle, pair_manager, test_amount) {
@@ -133,12 +163,12 @@ impl ArbitrageEngine {
                 continue;
             }
 
-            if let Some(opportunity) = self.calculate_arbitrage_profit(
-                triangle,
-                test_amount,
-                pair_manager,
-            ) {
-                if best_opp.as_ref().map_or(true, |o| opportunity.estimated_profit_pct > o.estimated_profit_pct) {
+            if let Some(opportunity) =
+                self.calculate_arbitrage_profit(triangle, test_amount, pair_manager)
+            {
+                if best_opp.as_ref().map_or(true, |o| {
+                    opportunity.estimated_profit_pct > o.estimated_profit_pct
+                }) {
                     best_opp = Some(opportunity.clone());
                 }
 
@@ -148,7 +178,7 @@ impl ArbitrageEngine {
             }
             scanned_count += 1;
         }
-        
+
         debug!("Scanned {} triangles for {}", scanned_count, base_currency);
         (scanned_count, found_opportunities, best_opp)
     }
@@ -167,29 +197,39 @@ impl ArbitrageEngine {
         if let (Some(p1), Some(p2), Some(p3)) = (pair1, pair2, pair3) {
             let pairs = [p1, p2, p3];
             let min_trade_size_usd = test_amount.max(crate::config::MIN_TRADE_AMOUNT_USD);
-            
+
             for pair in &pairs {
                 // Volume filter - must have sufficient 24h volume
                 if pair.volume_24h_usd < crate::config::MIN_VOLUME_24H_USD {
-                    debug!("❌ {} failed volume check: ${:.0} < ${:.0}", 
-                          pair.symbol, pair.volume_24h_usd, crate::config::MIN_VOLUME_24H_USD);
+                    debug!(
+                        "❌ {} failed volume check: ${:.0} < ${:.0}",
+                        pair.symbol,
+                        pair.volume_24h_usd,
+                        crate::config::MIN_VOLUME_24H_USD
+                    );
                     return false;
                 }
 
                 // Spread filter - spread must be reasonable
                 if pair.spread_percent > crate::config::MAX_SPREAD_PERCENT {
-                    debug!("❌ {} failed spread check: {:.2}% > {:.2}%", 
-                          pair.symbol, pair.spread_percent, crate::config::MAX_SPREAD_PERCENT);
+                    debug!(
+                        "❌ {} failed spread check: {:.2}% > {:.2}%",
+                        pair.symbol,
+                        pair.spread_percent,
+                        crate::config::MAX_SPREAD_PERCENT
+                    );
                     return false;
                 }
 
                 // Size filter - must have enough bid/ask size for our trade
                 let bid_size_usd = pair.bid_size * pair.bid_price;
                 let ask_size_usd = pair.ask_size * pair.ask_price;
-                
+
                 if bid_size_usd < min_trade_size_usd || ask_size_usd < min_trade_size_usd {
-                    debug!("❌ {} failed size check: bid ${:.0}, ask ${:.0} < ${:.0}", 
-                          pair.symbol, bid_size_usd, ask_size_usd, min_trade_size_usd);
+                    debug!(
+                        "❌ {} failed size check: bid ${:.0}, ask ${:.0} < ${:.0}",
+                        pair.symbol, bid_size_usd, ask_size_usd, min_trade_size_usd
+                    );
                     return false;
                 }
 
@@ -223,7 +263,7 @@ impl ArbitrageEngine {
         // Simulate the trades through the triangle using realistic bid/ask prices
         for (i, pair) in pairs.iter().enumerate() {
             let from_currency = &path[i];
-            
+
             // Determine if we're buying or selling and use appropriate price
             let (amount_after_trade, _effective_price) = if pair.base == *from_currency {
                 // Selling base for quote (from_currency/to_currency)
@@ -235,7 +275,7 @@ impl ArbitrageEngine {
                 prices.push(pair.bid_price);
                 (received, pair.bid_price)
             } else {
-                // Buying base with quote (to_currency/from_currency)  
+                // Buying base with quote (to_currency/from_currency)
                 // When buying, we pay the ask price (what market makers will sell for)
                 if pair.ask_price <= 0.0 {
                     return None; // Invalid price
@@ -254,23 +294,30 @@ impl ArbitrageEngine {
         let profit_pct = (profit_amount / test_amount) * 100.0;
 
         // Apply realistic slippage penalty (0.05% per trade = 0.15% total for 3 trades)
-        let slippage_penalty = 0.15; 
+        let slippage_penalty = 0.15;
         let profit_pct_with_slippage = profit_pct - slippage_penalty;
 
         // Estimate profit in USD (assuming USDT ≈ USD)
-        let estimated_usd_profit = if triangle.base_currency == "USDT" || triangle.base_currency == "USDC" {
-            (profit_amount - (test_amount * slippage_penalty / 100.0)) * (initial_amount / test_amount)
-        } else {
-            // For non-USD base currencies, we'd need price conversion
-            // For now, use a conservative estimate
-            (profit_amount - (test_amount * slippage_penalty / 100.0)) * 0.5 * (initial_amount / test_amount)
-        };
+        let estimated_usd_profit =
+            if triangle.base_currency == "USDT" || triangle.base_currency == "USDC" {
+                (profit_amount - (test_amount * slippage_penalty / 100.0))
+                    * (initial_amount / test_amount)
+            } else {
+                // For non-USD base currencies, we'd need price conversion
+                // For now, use a conservative estimate
+                (profit_amount - (test_amount * slippage_penalty / 100.0))
+                    * 0.5
+                    * (initial_amount / test_amount)
+            };
 
         if profit_pct_with_slippage > -50.0 && profit_pct_with_slippage.is_finite() {
             // Sanity check: Filter out unrealistic profits (> 100%) which usually indicate bad data
             if profit_pct_with_slippage > 100.0 {
-                debug!("⚠️ Filtered out unrealistic profit: {:.2}% (Path: {})", 
-                       profit_pct_with_slippage, path.join("->"));
+                debug!(
+                    "⚠️ Filtered out unrealistic profit: {:.2}% (Path: {})",
+                    profit_pct_with_slippage,
+                    path.join("->")
+                );
                 return None;
             }
 
@@ -314,8 +361,9 @@ impl ArbitrageEngine {
 
         let total_opportunities = self.opportunities.len();
         let profitable_count = self.get_profitable_opportunities(0.0).len();
-        
-        let max_profit = self.opportunities
+
+        let max_profit = self
+            .opportunities
             .iter()
             .map(|opp| opp.estimated_profit_pct)
             .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
@@ -325,12 +373,14 @@ impl ArbitrageEngine {
             self.opportunities
                 .iter()
                 .map(|opp| opp.estimated_profit_pct)
-                .sum::<f64>() / total_opportunities as f64
+                .sum::<f64>()
+                / total_opportunities as f64
         } else {
             0.0
         };
 
-        let total_estimated_usd = self.opportunities
+        let total_estimated_usd = self
+            .opportunities
             .iter()
             .map(|opp| opp.estimated_profit_usd)
             .sum();

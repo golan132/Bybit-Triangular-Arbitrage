@@ -35,7 +35,7 @@ async fn main() -> Result<()> {
     log_phase("init", "Loading configuration");
     let config = Config::from_env().context("Failed to load configuration")?;
     log_startup_info(config.min_profit_threshold, config.trading_fee_rate);
-    
+
     // Create Bybit client
     let client = BybitClient::new(config.clone()).context("Failed to create Bybit client")?;
     log_success("Initialization", "Bybit client created successfully");
@@ -44,30 +44,32 @@ async fn main() -> Result<()> {
     let mut balance_manager = BalanceManager::new();
     let mut pair_manager = PairManager::new();
     let mut arbitrage_engine = ArbitrageEngine::with_config(
-        config.min_profit_threshold, 
-        1000, // max_scan_count 
-        config.trading_fee_rate
+        config.min_profit_threshold,
+        1000, // max_scan_count
+        config.trading_fee_rate,
     );
-    
+
     // Initialize precision manager with dynamic data from Bybit
     log_phase("init", "Fetching precision data from Bybit API");
     let mut precision_manager = PrecisionManager::new();
-    
+
     // Load cached precision data if available
     if let Err(e) = precision_manager.load_cache_from_file("precision_cache.json") {
         warn!("⚠️ Failed to load precision cache: {}", e);
     }
-    
-    precision_manager.initialize(&client).await
+
+    precision_manager
+        .initialize(&client)
+        .await
         .context("Failed to initialize precision manager")?;
     precision_manager.print_precision_summary();
-    
+
     // Display precision cache statistics
     let (total_cached, _) = precision_manager.get_cache_stats();
     info!("📊 Precision Cache: {} symbols cached", total_cached);
-    
+
     log_success("Initialization", "Precision data loaded successfully");
-    
+
     // Create arbitrage trader (set dry_run to false for live trading)
     let dry_run = std::env::var("DRY_RUN").unwrap_or_else(|_| "true".to_string()) == "true";
     let max_trades = std::env::var("MAX_TRADES")
@@ -76,46 +78,70 @@ async fn main() -> Result<()> {
         .unwrap_or(1);
     let min_trade_amount = config.order_size; // Order size from .env file
     let mut trader = ArbitrageTrader::new(client.clone(), dry_run, precision_manager.clone());
-    
+
     if dry_run {
         info!("🧪 Running in DRY RUN mode - no actual trades will be executed");
-        info!("🎯 TRADE LIMIT: Bot will execute {} trade(s) and then stop", max_trades);
+        info!(
+            "🎯 TRADE LIMIT: Bot will execute {} trade(s) and then stop",
+            max_trades
+        );
     } else {
         info!("🚀 Running in LIVE TRADING mode - real trades will be executed!");
-        info!("🎯 TRADE LIMIT: Bot will execute {} trade(s) and then stop", max_trades);
+        info!(
+            "🎯 TRADE LIMIT: Bot will execute {} trade(s) and then stop",
+            max_trades
+        );
     }
-    
+
     // Initial pair fetch to populate symbols
     log_phase("init", "Fetching initial trading pairs");
-    pair_manager.update_pairs_and_prices(&client).await.context("Failed to fetch initial pairs")?;
+    pair_manager
+        .update_pairs_and_prices(&client)
+        .await
+        .context("Failed to fetch initial pairs")?;
 
     // Setup WebSocket
     let (tx, mut rx) = tokio::sync::mpsc::channel(10000);
-    
+
     // Optimization: Only subscribe to liquid symbols to save bandwidth and connections
     let all_symbols_count = pair_manager.get_pairs().len();
     let symbols = pair_manager.get_liquid_symbols();
-    
-    info!("🔌 Optimizing WebSocket: Selected {} liquid symbols out of {} total", symbols.len(), all_symbols_count);
-    
+
+    info!(
+        "🔌 Optimizing WebSocket: Selected {} liquid symbols out of {} total",
+        symbols.len(),
+        all_symbols_count
+    );
+
     if symbols.is_empty() {
         warn!("⚠️ No liquid symbols found! WebSocket will not subscribe to any pairs.");
     } else {
-        info!("🔌 Connecting to WebSocket for {} liquid symbols...", symbols.len());
-        
+        info!(
+            "🔌 Connecting to WebSocket for {} liquid symbols...",
+            symbols.len()
+        );
+
         // Split symbols into chunks of 100 to respect Bybit's connection limit
         // Bybit allows max 100 topics per connection
         const MAX_TOPICS_PER_CONNECTION: usize = 100;
-        let chunks: Vec<Vec<String>> = symbols.chunks(MAX_TOPICS_PER_CONNECTION)
+        let chunks: Vec<Vec<String>> = symbols
+            .chunks(MAX_TOPICS_PER_CONNECTION)
             .map(|chunk| chunk.to_vec())
             .collect();
-            
-        info!("🔌 Spawning {} WebSocket connections to handle liquid symbols", chunks.len());
-        
+
+        info!(
+            "🔌 Spawning {} WebSocket connections to handle liquid symbols",
+            chunks.len()
+        );
+
         for (i, chunk) in chunks.into_iter().enumerate() {
             let tx_clone = tx.clone();
             let conn_id = i + 1;
-            info!("🔌 Connection #{}: Managing {} symbols", conn_id, chunk.len());
+            info!(
+                "🔌 Connection #{}: Managing {} symbols",
+                conn_id,
+                chunk.len()
+            );
             tokio::spawn(BybitWebsocket::new(conn_id, chunk, tx_clone).run());
             // Add a small delay between connections to avoid rate limits
             sleep(Duration::from_millis(100)).await;
@@ -136,13 +162,13 @@ async fn main() -> Result<()> {
             _ = tokio::signal::ctrl_c() => {
                 println!(); // Newline
                 info!("🛑 Received Ctrl+C signal. Shutting down...");
-                
+
                 let duration = start_time.elapsed();
                 info!("📊 Session Summary:");
                 info!("   • Runtime: {:.2?}", duration);
                 info!("   • Total Cycles: {}", cycle_count);
                 info!("   • Trades Executed: {}/{}", trades_completed, max_trades);
-                
+
                 break;
             }
             res = run_arbitrage_cycle(&client, &mut balance_manager, &mut pair_manager, &mut arbitrage_engine, &mut trader, &precision_manager, cycle_count + 1, &mut initial_scan_logged, &mut trades_completed, max_trades, min_trade_amount, &mut rx) => {
@@ -169,12 +195,12 @@ async fn main() -> Result<()> {
             }
         }
     }
-    
+
     // Save precision cache on exit
     if let Err(e) = trader.get_precision_manager().auto_save_cache() {
         warn!("⚠️ Failed to save precision cache on exit: {}", e);
     }
-    
+
     Ok(())
 }
 
@@ -193,10 +219,13 @@ async fn run_arbitrage_cycle(
     rx: &mut tokio::sync::mpsc::Receiver<crate::models::TickerInfo>,
 ) -> Result<bool> {
     let cycle_start = Instant::now();
-    
+
     // Only log cycle start every 50 cycles to reduce spam
     if cycle_count % 50 == 0 {
-        info!("🔄 Cycle #{} - Scanning for arbitrage opportunities", cycle_count);
+        info!(
+            "🔄 Cycle #{} - Scanning for arbitrage opportunities",
+            cycle_count
+        );
     }
 
     // Phase 1: Update account balances
@@ -205,25 +234,25 @@ async fn run_arbitrage_cycle(
             log_phase("balance", "Refreshing account balances");
         }
         let balance_start = Instant::now();
-        
+
         balance_manager
             .update_balances(client)
             .await
             .context("Failed to update balances")?;
-        
+
         // Log initial scanning info only once after first balance update
         if !*initial_scan_logged {
             balance_manager.log_initial_scanning_info_with_min_amount(min_trade_amount);
             *initial_scan_logged = true;
         }
-        
+
         if cycle_count % 10 == 0 {
             log_performance_metrics(
                 "Balance fetch",
                 balance_start.elapsed().as_millis() as u64,
                 Some(balance_manager.get_all_balances().len()),
             );
-            
+
             log_balance_summary(&balance_manager.get_balance_summary());
         }
     }
@@ -231,24 +260,27 @@ async fn run_arbitrage_cycle(
     // Phase 2: Update trading pairs and prices
     // Full refresh (instruments + prices) every 2000 cycles or if empty
     let needs_full_refresh = pair_manager.get_pairs().is_empty() || cycle_count % 2000 == 0;
-    
+
     if needs_full_refresh {
-        log_phase("pairs", "Performing FULL refresh of trading pairs and prices (Instruments + Tickers)");
+        log_phase(
+            "pairs",
+            "Performing FULL refresh of trading pairs and prices (Instruments + Tickers)",
+        );
         let pairs_start = Instant::now();
-        
+
         pair_manager
             .update_pairs_and_prices(client)
             .await
             .context("Failed to update pairs and prices")?;
-            
+
         log_performance_metrics(
             "Full pairs refresh",
             pairs_start.elapsed().as_millis() as u64,
             Some(pair_manager.get_pairs().len()),
         );
-        
+
         log_pair_statistics(&pair_manager.get_statistics());
-    } 
+    }
     // Process WebSocket updates for prices
     else {
         let mut updates_count = 0;
@@ -256,7 +288,7 @@ async fn run_arbitrage_cycle(
             pair_manager.update_from_ticker(&ticker);
             updates_count += 1;
         }
-        
+
         if updates_count > 0 {
             if cycle_count % 10 == 0 {
                 info!("⚡ Processed {} WebSocket ticker updates", updates_count);
@@ -268,80 +300,108 @@ async fn run_arbitrage_cycle(
 
     // Phase 3: Scan for arbitrage opportunities
     let arbitrage_start = Instant::now();
-    
-    let opportunities = arbitrage_engine.scan_opportunities_with_min_amount(pair_manager, balance_manager, min_trade_amount);
-    
+
+    let opportunities = arbitrage_engine.scan_opportunities_with_min_amount(
+        pair_manager,
+        balance_manager,
+        min_trade_amount,
+    );
+
     // Execute profitable opportunities (only the most profitable one per cycle)
     if let Some(best_opportunity) = opportunities.first() {
         // Only log periodically to avoid spam, even for profitable ones (since we log execution separately)
         if cycle_count % 10 == 0 {
             log_arbitrage_opportunity(best_opportunity, 1);
         }
-        
+
         // Execute the trade if profit is above threshold and we have sufficient balance
         // AND we haven't reached the maximum number of trades yet
-        if *trades_completed < max_trades && best_opportunity.estimated_profit_pct > 0.01 { // More than 0.01% profit
+        if *trades_completed < max_trades && best_opportunity.estimated_profit_pct > 0.01 {
+            // More than 0.01% profit
             let usdt_balance = balance_manager.get_balance("USDT");
             if usdt_balance >= min_trade_amount {
-                warn!("💰 EXECUTING TRADE #{}: Found profitable opportunity {:.2}% - executing!", 
-                      *trades_completed + 1, best_opportunity.estimated_profit_pct);
-                
-                match trader.execute_arbitrage(best_opportunity, min_trade_amount).await {
+                warn!(
+                    "💰 EXECUTING TRADE #{}: Found profitable opportunity {:.2}% - executing!",
+                    *trades_completed + 1,
+                    best_opportunity.estimated_profit_pct
+                );
+
+                match trader
+                    .execute_arbitrage(best_opportunity, min_trade_amount)
+                    .await
+                {
                     Ok(result) => {
                         if result.success {
                             *trades_completed += 1; // Only increment on successful trades
                             warn!("✅ TRADE #{} SUCCESS!", *trades_completed);
-                            warn!("   Realized Profit: ${:.6} ({:.2}%)", result.actual_profit, result.actual_profit_pct);
+                            warn!(
+                                "   Realized Profit: ${:.6} ({:.2}%)",
+                                result.actual_profit, result.actual_profit_pct
+                            );
                             if result.dust_value_usd > 0.0 {
                                 warn!("   Dust Value: ${:.6}", result.dust_value_usd);
                                 let total_profit = result.actual_profit + result.dust_value_usd;
                                 let total_pct = (total_profit / result.initial_amount) * 100.0;
-                                warn!("   Total Profit (inc. Dust): ${:.6} ({:.2}%)", total_profit, total_pct);
+                                warn!(
+                                    "   Total Profit (inc. Dust): ${:.6} ({:.2}%)",
+                                    total_profit, total_pct
+                                );
                             }
                             warn!("   Execution time: {}ms", result.execution_time_ms);
                             warn!("   Total fees: ${:.6}", result.total_fees);
-                            
+
                             // Force balance refresh after successful trade
                             balance_manager.force_refresh();
-                            
+
                             // Save precision cache after successful trade
                             if let Err(e) = trader.get_precision_manager().auto_save_cache() {
                                 warn!("⚠️ Failed to save precision cache: {}", e);
                             }
-                            
+
                             if *trades_completed >= max_trades {
-                                warn!("🏁 All {} trade(s) completed successfully - stopping bot", max_trades);
+                                warn!(
+                                    "🏁 All {} trade(s) completed successfully - stopping bot",
+                                    max_trades
+                                );
                                 return Ok(true); // Signal to exit the main loop
                             } else {
                                 warn!("⏳ Trade {}/{} completed, continuing to look for next opportunity...", 
                                       *trades_completed, max_trades);
                             }
                         } else {
-                            let error_msg = result.error_message.unwrap_or_else(|| "Unknown error".to_string());
+                            let error_msg = result
+                                .error_message
+                                .unwrap_or_else(|| "Unknown error".to_string());
                             warn!("❌ TRADE FAILED: {}", error_msg);
-                            
+
                             // Check if it's a recoverable error (API restrictions, etc.)
-                            if error_msg.contains("170348") || error_msg.contains("geographical") || error_msg.contains("restricted") {
+                            if error_msg.contains("170348")
+                                || error_msg.contains("geographical")
+                                || error_msg.contains("restricted")
+                            {
                                 warn!("🚫 Trade failed due to geographical/API restrictions - continuing to scan for other opportunities");
                             } else {
                                 warn!("⚠️ Trade failed with different error - continuing to scan");
                             }
-                            
+
                             // Don't increment trade counter for failed trades - keep looking for opportunities
                             info!("🔄 Continuing to scan for other profitable opportunities...");
                         }
-                    },
+                    }
                     Err(e) => {
                         let error_str = e.to_string();
                         warn!("❌ Trade execution error: {}", error_str);
-                        
+
                         // Check if it's a recoverable error
-                        if error_str.contains("170348") || error_str.contains("geographical") || error_str.contains("restricted") {
+                        if error_str.contains("170348")
+                            || error_str.contains("geographical")
+                            || error_str.contains("restricted")
+                        {
                             warn!("🚫 Trade failed due to geographical/API restrictions - continuing to scan for other opportunities");
                         } else {
                             warn!("⚠️ Trade failed with different error - continuing to scan");
                         }
-                        
+
                         // Don't increment trade counter for errors - keep looking for opportunities
                         info!("🔄 Continuing to scan for other profitable opportunities...");
                     }
@@ -355,7 +415,10 @@ async fn run_arbitrage_cycle(
         } else if *trades_completed >= max_trades {
             // All trades completed, just continue scanning until we exit
             if cycle_count % 100 == 0 {
-                info!("⏳ All {} trades completed - scanning for exit condition...", max_trades);
+                info!(
+                    "⏳ All {} trades completed - scanning for exit condition...",
+                    max_trades
+                );
             }
         }
     }
@@ -383,14 +446,14 @@ async fn run_arbitrage_cycle(
         info!("  • Total opportunities: {}", opportunities.len());
         info!("  • Cycle time: {:.2}ms", cycle_duration.as_millis());
     }
-    
+
     Ok(false) // Continue running unless trade was executed
 }
 
 /// Create a sample .env file for configuration
 pub fn create_sample_env_file() -> Result<()> {
     use std::fs;
-    
+
     let sample_content = r#"# Bybit API Configuration
 # Get your API keys from: https://www.bybit.com/app/user/api-management
 
@@ -412,11 +475,10 @@ MAX_RETRIES=3
 RUST_LOG=info
 "#;
 
-    fs::write(".env.sample", sample_content)
-        .context("Failed to create .env.sample file")?;
-    
+    fs::write(".env.sample", sample_content).context("Failed to create .env.sample file")?;
+
     info!("📋 Created .env.sample file with configuration template");
-    
+
     Ok(())
 }
 
@@ -430,7 +492,7 @@ mod tests {
         let balance_manager = BalanceManager::new();
         let pair_manager = PairManager::new();
         let arbitrage_engine = ArbitrageEngine::new();
-        
+
         assert_eq!(balance_manager.get_all_balances().len(), 0);
         assert_eq!(pair_manager.get_pairs().len(), 0);
         assert_eq!(arbitrage_engine.get_opportunities().len(), 0);
@@ -440,7 +502,7 @@ mod tests {
     fn test_create_sample_env() {
         let result = create_sample_env_file();
         assert!(result.is_ok());
-        
+
         // Clean up
         std::fs::remove_file(".env.sample").ok();
     }

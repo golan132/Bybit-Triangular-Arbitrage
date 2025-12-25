@@ -20,9 +20,9 @@ impl Config {
     pub fn from_env() -> Result<Self> {
         dotenv::dotenv().ok(); // Load .env file if present
 
-        let api_key = env::var("BYBIT_API_KEY")
-            .context("BYBIT_API_KEY environment variable is required")?;
-        
+        let api_key =
+            env::var("BYBIT_API_KEY").context("BYBIT_API_KEY environment variable is required")?;
+
         let api_secret = env::var("BYBIT_API_SECRET")
             .context("BYBIT_API_SECRET environment variable is required")?;
 
@@ -107,42 +107,42 @@ pub const MIN_TRADE_AMOUNT_USD: f64 = 10.0; // Minimum trade amount for realisti
 
 // Blacklisted tokens that should be excluded from arbitrage (geographical restrictions, etc.)
 pub const BLACKLISTED_TOKENS: &[&str] = &[
-    "USDR",    // USD Reserve - restricted in Netherlands and other regions
-    "BUSD",    // Binance USD - being phased out
-    "UST",     // TerraUSD - collapsed stablecoin
-    "LUNA",    // Terra Luna - collapsed
-    "FTT",     // FTX Token - exchange collapsed
-    "CEL",     // Celsius - platform issues
-    "LUNC",    // Terra Luna Classic - collapsed
-    "USTC",    // TerraUSD Classic - collapsed
-    "TRY",     // Turkish Lira - geographical restrictions (Error 170348)
-    "BRL",     // Brazilian Real - high slippage and low liquidity
+    "USDR", // USD Reserve - restricted in Netherlands and other regions
+    "BUSD", // Binance USD - being phased out
+    "UST",  // TerraUSD - collapsed stablecoin
+    "LUNA", // Terra Luna - collapsed
+    "FTT",  // FTX Token - exchange collapsed
+    "CEL",  // Celsius - platform issues
+    "LUNC", // Terra Luna Classic - collapsed
+    "USTC", // TerraUSD Classic - collapsed
+    "TRY",  // Turkish Lira - geographical restrictions (Error 170348)
+    "BRL",  // Brazilian Real - high slippage and low liquidity
     // ⚠️ Newly added delisted / restricted tokens:
-    "RDNT",    // Delisted
-    "MOVR",    // Delisted
-    "HOOK",    // Delisted
-    "TST",     // Delisted
-    "5IRE",    // Delisted
-    "APTR",    // Delisted
-    "ERTHA",   // Delisted
-    "GUMMY",   // Delisted
-    "PIP",     // Delisted
-    "WWY",     // Delisted
-    "XETA",    // Delisted
-    "VRTX",    // Delisted
-    "FAR",     // Delisted
-    "TAP",     // Delisted
-    "KCAL",    // Delisted
-    "VPR",     // Delisted
-    "SON",     // Delisted
-    "COT",     // Delisted
-    "MOJO",    // Delisted
-    "TENET",   // Delisted
-    "SALD",    // Delisted
-    "HVH",     // Delisted
-    "BRAWL",   // Delisted
-    "THN",     // Delisted
-    "PI",      // Pi token – rejected due to scam risk
+    "RDNT",  // Delisted
+    "MOVR",  // Delisted
+    "HOOK",  // Delisted
+    "TST",   // Delisted
+    "5IRE",  // Delisted
+    "APTR",  // Delisted
+    "ERTHA", // Delisted
+    "GUMMY", // Delisted
+    "PIP",   // Delisted
+    "WWY",   // Delisted
+    "XETA",  // Delisted
+    "VRTX",  // Delisted
+    "FAR",   // Delisted
+    "TAP",   // Delisted
+    "KCAL",  // Delisted
+    "VPR",   // Delisted
+    "SON",   // Delisted
+    "COT",   // Delisted
+    "MOJO",  // Delisted
+    "TENET", // Delisted
+    "SALD",  // Delisted
+    "HVH",   // Delisted
+    "BRAWL", // Delisted
+    "THN",   // Delisted
+    "PI",    // Pi token – rejected due to scam risk
 ];
 
 /// Check if a token is blacklisted for arbitrage

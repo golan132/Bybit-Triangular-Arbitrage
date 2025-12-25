@@ -1,5 +1,5 @@
-use tracing::{info, warn, error, debug};
-use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+use tracing::{debug, error, info, warn};
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 struct LocalTimer;
 
@@ -24,8 +24,7 @@ pub fn init_logger() -> Result<(), anyhow::Error> {
 
     // Set up environment filter
     // Default to INFO level, but allow override via RUST_LOG env var
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
     // Initialize the subscriber
     tracing_subscriber::registry()
@@ -34,30 +33,42 @@ pub fn init_logger() -> Result<(), anyhow::Error> {
         .init();
 
     info!("🚀 Bybit Triangular Arbitrage Bot Starting...");
-    
+
     Ok(())
 }
 
 /// Log configuration with runtime values
 pub fn log_startup_info(min_profit_threshold: f64, trading_fee_rate: f64) {
-    info!("📈 Bybit Triangular Arbitrage Bot v{}", env!("CARGO_PKG_VERSION"));
+    info!(
+        "📈 Bybit Triangular Arbitrage Bot v{}",
+        env!("CARGO_PKG_VERSION")
+    );
     info!("⚡ Powered by Rust for high-performance trading analysis");
     info!("🎯 Mode: Real Trading Analysis (No Testnet)");
-    
+
     // Log some configuration info (without sensitive data)
     info!("📋 Configuration:");
     info!("  • Min Profit Threshold: {:.2}%", min_profit_threshold);
-    info!("  • Trading Fee Rate: {:.2}% per trade", trading_fee_rate * 100.0);
-    info!("  • Max Triangles to Scan: {}", crate::config::MAX_TRIANGLES_TO_SCAN);
-    info!("  • Balance Refresh: {}s", crate::config::BALANCE_REFRESH_INTERVAL_SECS);
-    info!("  • Price Refresh: {}s", crate::config::PRICE_REFRESH_INTERVAL_SECS);
+    info!(
+        "  • Trading Fee Rate: {:.2}% per trade",
+        trading_fee_rate * 100.0
+    );
+    info!(
+        "  • Max Triangles to Scan: {}",
+        crate::config::MAX_TRIANGLES_TO_SCAN
+    );
+    info!(
+        "  • Balance Refresh: {}s",
+        crate::config::BALANCE_REFRESH_INTERVAL_SECS
+    );
+    info!(
+        "  • Price Refresh: {}s",
+        crate::config::PRICE_REFRESH_INTERVAL_SECS
+    );
 }
 
 /// Log arbitrage opportunity in a formatted way
-pub fn log_arbitrage_opportunity(
-    opportunity: &crate::models::ArbitrageOpportunity,
-    rank: usize,
-) {
+pub fn log_arbitrage_opportunity(opportunity: &crate::models::ArbitrageOpportunity, rank: usize) {
     info!(
         "[OPPORTUNITY #{}] {} | Est. Profit: {:+.2}% (${:.2})",
         rank,
@@ -65,15 +76,21 @@ pub fn log_arbitrage_opportunity(
         opportunity.estimated_profit_pct,
         opportunity.estimated_profit_usd
     );
-    
+
     debug!("  Pairs: {}", opportunity.display_pairs());
-    debug!("  Prices: [{}]", 
-           opportunity.prices
-               .iter()
-               .map(|p| format!("{:.8}", p))
-               .collect::<Vec<_>>()
-               .join(", "));
-    debug!("  Timestamp: {}", opportunity.timestamp.format("%H:%M:%S%.3f UTC"));
+    debug!(
+        "  Prices: [{}]",
+        opportunity
+            .prices
+            .iter()
+            .map(|p| format!("{:.8}", p))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    debug!(
+        "  Timestamp: {}",
+        opportunity.timestamp.format("%H:%M:%S%.3f UTC")
+    );
 }
 
 /// Log detailed arbitrage opportunity with bid/ask prices for manual verification
@@ -104,14 +121,14 @@ pub fn log_phase(phase: &str, message: &str) {
         "error" => "❌",
         _ => "ℹ️",
     };
-    
+
     info!("{} {}: {}", emoji, phase.to_uppercase(), message);
 }
 
 /// Log errors with context
 pub fn log_error_with_context(context: &str, error: &dyn std::error::Error) {
     error!("❌ Error in {}: {}", context, error);
-    
+
     // Log the error chain if available
     let mut source = error.source();
     let mut level = 1;
@@ -119,7 +136,7 @@ pub fn log_error_with_context(context: &str, error: &dyn std::error::Error) {
         error!("  └─ Caused by ({}): {}", level, err);
         source = err.source();
         level += 1;
-        
+
         // Prevent infinite loops
         if level > 10 {
             error!("  └─ ... (truncated error chain)");
@@ -139,11 +156,7 @@ pub fn log_success(operation: &str, details: &str) {
 }
 
 /// Log performance metrics
-pub fn log_performance_metrics(
-    operation: &str,
-    duration_ms: u64,
-    items_processed: Option<usize>,
-) {
+pub fn log_performance_metrics(operation: &str, duration_ms: u64, items_processed: Option<usize>) {
     let performance_msg = match items_processed {
         Some(count) => {
             let rate = if duration_ms > 0 {
@@ -151,11 +164,14 @@ pub fn log_performance_metrics(
             } else {
                 0.0
             };
-            format!("{} items in {}ms ({:.1} items/sec)", count, duration_ms, rate)
+            format!(
+                "{} items in {}ms ({:.1} items/sec)",
+                count, duration_ms, rate
+            )
         }
         None => format!("completed in {}ms", duration_ms),
     };
-    
+
     debug!("⚡ {}: {}", operation, performance_msg);
 }
 

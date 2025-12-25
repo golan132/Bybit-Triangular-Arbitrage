@@ -25,16 +25,16 @@ impl BalanceManager {
 
         // Try different account types to find balances
         let account_types = vec!["UNIFIED", "SPOT", "CONTRACT"];
-        
+
         for account_type in account_types {
             match client.get_wallet_balance(Some(account_type)).await {
                 Ok(wallet_result) => {
                     debug!("Checking {} account type", account_type);
-                    
+
                     for account in &wallet_result.list {
                         let acct_type = account.account_type.as_deref().unwrap_or("UNKNOWN");
                         debug!("Processing account type: {}", acct_type);
-                        
+
                         for coin_balance in &account.coin {
                             // Try multiple balance fields
                             let balance_sources = vec![
@@ -42,24 +42,30 @@ impl BalanceManager {
                                 ("available_to_withdraw", &coin_balance.available_to_withdraw),
                                 ("equity", &coin_balance.equity),
                             ];
-                            
+
                             let mut found_balance = false;
                             for (name, balance_opt) in balance_sources {
                                 if let Some(balance_str) = balance_opt {
                                     if let Ok(balance) = balance_str.parse::<f64>() {
                                         if balance > 0.0 {
-                                            self.balances.insert(coin_balance.coin.clone(), balance);
-                                            debug!("Added {} balance: {} = {} (from {})", 
-                                                   account_type, coin_balance.coin, balance, name);
+                                            self.balances
+                                                .insert(coin_balance.coin.clone(), balance);
+                                            debug!(
+                                                "Added {} balance: {} = {} (from {})",
+                                                account_type, coin_balance.coin, balance, name
+                                            );
                                             found_balance = true;
                                             break;
                                         }
                                     }
                                 }
                             }
-                            
+
                             if !found_balance {
-                                debug!("No positive balance found for {} in {}", coin_balance.coin, account_type);
+                                debug!(
+                                    "No positive balance found for {} in {}",
+                                    coin_balance.coin, account_type
+                                );
                             }
                         }
                     }
@@ -71,7 +77,7 @@ impl BalanceManager {
         }
 
         self.last_updated = Some(chrono::Utc::now());
-        
+
         info!("✅ Updated balances for {} assets", self.balances.len());
         self.log_balances();
 
@@ -129,7 +135,7 @@ impl BalanceManager {
     /// Log initial account scanning configuration with minimum trade amount filtering
     pub fn log_initial_scanning_info_with_min_amount(&self, min_trade_amount: f64) {
         let all_coins = self.get_available_coins();
-        
+
         if all_coins.is_empty() {
             info!("🔍 Account Scanning: No balances found - will scan popular currencies");
             return;
@@ -138,7 +144,7 @@ impl BalanceManager {
         // Filter coins that have sufficient balance for trading
         let mut sufficient_coins = Vec::new();
         let mut insufficient_coins = Vec::new();
-        
+
         for coin in &all_coins {
             let balance = self.get_balance(coin);
             let usd_value = if coin == "USDT" || coin == "USDC" || coin == "BUSD" {
@@ -148,31 +154,38 @@ impl BalanceManager {
                 // For now, assume we need the minimum in the coin itself
                 balance
             };
-            
+
             if usd_value >= min_trade_amount {
                 sufficient_coins.push((coin.clone(), balance, usd_value));
             } else {
                 insufficient_coins.push((coin.clone(), balance, usd_value));
             }
         }
-        
-        info!("🔍 Account Scanning: Found {} total assets, {} with sufficient balance (>${:.0})", 
-              all_coins.len(), sufficient_coins.len(), min_trade_amount);
-        
+
+        info!(
+            "🔍 Account Scanning: Found {} total assets, {} with sufficient balance (>${:.0})",
+            all_coins.len(),
+            sufficient_coins.len(),
+            min_trade_amount
+        );
+
         if !sufficient_coins.is_empty() {
             info!("✅ Assets available for trading:");
             for (coin, balance, usd_value) in &sufficient_coins {
                 info!("   {} (balance: {:.6}, ~${:.2})", coin, balance, usd_value);
             }
         }
-        
+
         if !insufficient_coins.is_empty() {
-            info!("❌ Assets with insufficient balance (below ${:.0}):", min_trade_amount);
+            info!(
+                "❌ Assets with insufficient balance (below ${:.0}):",
+                min_trade_amount
+            );
             for (coin, balance, usd_value) in &insufficient_coins {
                 info!("   {} (balance: {:.6}, ~${:.2})", coin, balance, usd_value);
             }
         }
-        
+
         if sufficient_coins.is_empty() {
             info!("⚠️  No assets have sufficient balance for trading!");
         }
@@ -189,7 +202,7 @@ impl BalanceManager {
                     // For other coins, assume we need the minimum in the coin itself
                     balance
                 };
-                
+
                 if usd_value >= min_trade_amount {
                     Some(coin.clone())
                 } else {
@@ -212,7 +225,8 @@ impl BalanceManager {
     pub fn get_balance_summary(&self) -> BalanceSummary {
         let total_coins = self.balances.len();
         let significant_balances = self.get_significant_balances(0.001).len();
-        let largest_balance = self.balances
+        let largest_balance = self
+            .balances
             .values()
             .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .copied()
@@ -293,11 +307,11 @@ mod tests {
     #[test]
     fn test_balance_operations() {
         let mut manager = BalanceManager::new();
-        
+
         // Manually add balances for testing
         manager.balances.insert("BTC".to_string(), 1.5);
         manager.balances.insert("USDT".to_string(), 1000.0);
-        
+
         assert_eq!(manager.get_balance("BTC"), 1.5);
         assert_eq!(manager.get_balance("ETH"), 0.0);
     }

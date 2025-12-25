@@ -28,7 +28,8 @@ impl PairManager {
 
     /// Get only liquid symbols for optimized WebSocket subscription
     pub fn get_liquid_symbols(&self) -> Vec<String> {
-        self.pairs.iter()
+        self.pairs
+            .iter()
             .filter(|p| p.is_liquid && p.is_active)
             .map(|p| p.symbol.clone())
             .collect()
@@ -36,8 +37,11 @@ impl PairManager {
 
     pub fn update_from_ticker(&mut self, ticker: &crate::models::TickerInfo) {
         // Try to get price from last_price, or keep existing if not present
-        let price_opt = ticker.last_price.as_ref().and_then(|s| s.parse::<f64>().ok());
-        
+        let price_opt = ticker
+            .last_price
+            .as_ref()
+            .and_then(|s| s.parse::<f64>().ok());
+
         if let Some(&idx) = self.symbol_to_pair.get(&ticker.symbol) {
             if let Some(pair) = self.pairs.get_mut(idx) {
                 // Update last price if available
@@ -45,18 +49,26 @@ impl PairManager {
                     pair.price = price;
                     self.price_map.insert(ticker.symbol.clone(), price);
                 }
-                
+
                 // Also update bid/ask if available
                 let mut prices_updated = false;
-                
-                if let Some(bid) = ticker.bid1_price.as_ref().and_then(|s| s.parse::<f64>().ok()) {
+
+                if let Some(bid) = ticker
+                    .bid1_price
+                    .as_ref()
+                    .and_then(|s| s.parse::<f64>().ok())
+                {
                     if bid > 0.0 {
                         pair.bid_price = bid;
                         prices_updated = true;
                     }
                 }
-                
-                if let Some(ask) = ticker.ask1_price.as_ref().and_then(|s| s.parse::<f64>().ok()) {
+
+                if let Some(ask) = ticker
+                    .ask1_price
+                    .as_ref()
+                    .and_then(|s| s.parse::<f64>().ok())
+                {
                     if ask > 0.0 {
                         pair.ask_price = ask;
                         prices_updated = true;
@@ -66,18 +78,27 @@ impl PairManager {
                 if prices_updated {
                     // Re-calculate spread
                     if pair.bid_price > 0.0 {
-                        pair.spread_percent = ((pair.ask_price - pair.bid_price) / pair.bid_price) * 100.0;
+                        pair.spread_percent =
+                            ((pair.ask_price - pair.bid_price) / pair.bid_price) * 100.0;
                     }
                 }
-                
+
                 // Update volume if available
-                if let Some(vol) = ticker.volume24h.as_ref().and_then(|s| s.parse::<f64>().ok()) {
+                if let Some(vol) = ticker
+                    .volume24h
+                    .as_ref()
+                    .and_then(|s| s.parse::<f64>().ok())
+                {
                     pair.volume_24h = vol;
                 }
 
                 // Update liquidity status
                 // Estimate 24h volume in USD
-                let volume_24h_usd = if let Some(turnover) = ticker.turnover24h.as_ref().and_then(|s| s.parse::<f64>().ok()) {
+                let volume_24h_usd = if let Some(turnover) = ticker
+                    .turnover24h
+                    .as_ref()
+                    .and_then(|s| s.parse::<f64>().ok())
+                {
                     turnover
                 } else {
                     pair.volume_24h * pair.price
@@ -85,10 +106,18 @@ impl PairManager {
                 pair.volume_24h_usd = volume_24h_usd;
 
                 // Re-evaluate liquidity
-                if let Some(bs) = ticker.bid1_size.as_ref().and_then(|s| s.parse::<f64>().ok()) {
+                if let Some(bs) = ticker
+                    .bid1_size
+                    .as_ref()
+                    .and_then(|s| s.parse::<f64>().ok())
+                {
                     pair.bid_size = bs;
                 }
-                if let Some(as_size) = ticker.ask1_size.as_ref().and_then(|s| s.parse::<f64>().ok()) {
+                if let Some(as_size) = ticker
+                    .ask1_size
+                    .as_ref()
+                    .and_then(|s| s.parse::<f64>().ok())
+                {
                     pair.ask_size = as_size;
                 }
 
@@ -125,7 +154,11 @@ impl PairManager {
         // Create price map from tickers (for backward compatibility)
         let mut price_map = HashMap::new();
         for ticker in &tickers_result.list {
-            if let Some(price) = ticker.last_price.as_ref().and_then(|s| s.parse::<f64>().ok()) {
+            if let Some(price) = ticker
+                .last_price
+                .as_ref()
+                .and_then(|s| s.parse::<f64>().ok())
+            {
                 price_map.insert(ticker.symbol.clone(), price);
             }
         }
@@ -137,8 +170,9 @@ impl PairManager {
 
         for (idx, instrument) in instruments.iter().enumerate() {
             // Check if base or quote currency is blacklisted
-            if config::is_token_blacklisted(&instrument.base_coin) || 
-               config::is_token_blacklisted(&instrument.quote_coin) {
+            if config::is_token_blacklisted(&instrument.base_coin)
+                || config::is_token_blacklisted(&instrument.quote_coin)
+            {
                 blacklisted_count += 1;
                 continue;
             }
@@ -152,9 +186,13 @@ impl PairManager {
         }
 
         // Filter out pairs with zero or invalid prices
-        pairs.retain(|pair| pair.price > 0.0 && pair.price.is_finite() && 
-                           pair.bid_price > 0.0 && pair.ask_price > 0.0 && 
-                           pair.bid_price < pair.ask_price);
+        pairs.retain(|pair| {
+            pair.price > 0.0
+                && pair.price.is_finite()
+                && pair.bid_price > 0.0
+                && pair.ask_price > 0.0
+                && pair.bid_price < pair.ask_price
+        });
 
         // Rebuild symbol_to_pair map after filtering
         symbol_to_pair.clear();
@@ -163,7 +201,10 @@ impl PairManager {
         }
 
         if blacklisted_count > 0 {
-            info!("🚫 Filtered out {} pairs containing blacklisted tokens", blacklisted_count);
+            info!(
+                "🚫 Filtered out {} pairs containing blacklisted tokens",
+                blacklisted_count
+            );
         }
 
         self.pairs = pairs;
@@ -171,14 +212,15 @@ impl PairManager {
         self.symbol_to_pair = symbol_to_pair;
         self.last_updated = Some(chrono::Utc::now());
 
-        info!("✅ Updated {} trading pairs with current prices", self.pairs.len());
+        info!(
+            "✅ Updated {} trading pairs with current prices",
+            self.pairs.len()
+        );
         self.log_pair_statistics();
         self.log_bid_ask_analysis();
 
         Ok(())
     }
-
-
 
     /// Get all market pairs
     pub fn get_pairs(&self) -> &[MarketPair] {
@@ -196,12 +238,12 @@ impl PairManager {
     /// Get all unique currencies from pairs
     pub fn get_all_currencies(&self) -> Vec<String> {
         let mut currencies = std::collections::HashSet::new();
-        
+
         for pair in &self.pairs {
             currencies.insert(pair.base.clone());
             currencies.insert(pair.quote.clone());
         }
-        
+
         let mut result: Vec<String> = currencies.into_iter().collect();
         result.sort();
         result
@@ -217,9 +259,10 @@ impl PairManager {
     /// Find pairs that could form triangular arbitrage with given base currency
     pub fn find_triangle_pairs(&self, base_currency: &str) -> Vec<TrianglePairs> {
         let mut triangles = Vec::new();
-        
+
         // Only consider liquid pairs for arbitrage
-        let liquid_pairs: Vec<&MarketPair> = self.pairs
+        let liquid_pairs: Vec<&MarketPair> = self
+            .pairs
             .iter()
             .filter(|pair| pair.is_liquid && pair.is_active)
             .collect();
@@ -230,8 +273,11 @@ impl PairManager {
             .cloned()
             .collect();
 
-        debug!("🔍 Looking for triangles with {} liquid pairs containing {}", 
-               pairs_with_base.len(), base_currency);
+        debug!(
+            "🔍 Looking for triangles with {} liquid pairs containing {}",
+            pairs_with_base.len(),
+            base_currency
+        );
 
         for pair1 in &pairs_with_base {
             // pair1: base -> intermediate
@@ -279,7 +325,8 @@ impl PairManager {
                         continue; // Skip duplicate pairs
                     }
 
-                    let closes_loop = (pair3.base == *final_currency && pair3.quote == *base_currency)
+                    let closes_loop = (pair3.base == *final_currency
+                        && pair3.quote == *base_currency)
                         || (pair3.quote == *final_currency && pair3.base == *base_currency);
 
                     if closes_loop {
@@ -300,9 +347,12 @@ impl PairManager {
             }
         }
 
-        debug!("Found {} potential triangles for base currency {}", 
-               triangles.len(), base_currency);
-        
+        debug!(
+            "Found {} potential triangles for base currency {}",
+            triangles.len(),
+            base_currency
+        );
+
         triangles
     }
 
@@ -314,14 +364,16 @@ impl PairManager {
 
         let currencies = self.get_all_currencies();
         let avg_price = self.pairs.iter().map(|p| p.price).sum::<f64>() / self.pairs.len() as f64;
-        
-        let min_price = self.pairs
+
+        let min_price = self
+            .pairs
             .iter()
             .map(|p| p.price)
             .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .unwrap_or(0.0);
 
-        let max_price = self.pairs
+        let max_price = self
+            .pairs
             .iter()
             .map(|p| p.price)
             .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
@@ -340,37 +392,54 @@ impl PairManager {
 
     /// Check if data needs refresh
 
-
     /// Log pair statistics for debugging
     fn log_pair_statistics(&self) {
         let stats = self.get_statistics();
         let liquid_pairs = self.pairs.iter().filter(|p| p.is_liquid).count();
-        
+
         info!("📊 Pair Statistics:");
         info!("  Total pairs: {}", stats.total_pairs);
         info!("  Active pairs: {}", stats.active_pairs);
-        info!("  Liquid pairs: {} ({:.1}%)", liquid_pairs, (liquid_pairs as f64 / stats.total_pairs as f64) * 100.0);
+        info!(
+            "  Liquid pairs: {} ({:.1}%)",
+            liquid_pairs,
+            (liquid_pairs as f64 / stats.total_pairs as f64) * 100.0
+        );
         info!("  Total currencies: {}", stats.total_currencies);
-        info!("  Price range: {:.8} - {:.8}", stats.min_price, stats.max_price);
-        
+        info!(
+            "  Price range: {:.8} - {:.8}",
+            stats.min_price, stats.max_price
+        );
+
         // Volume statistics
         let volumes: Vec<f64> = self.pairs.iter().map(|p| p.volume_24h_usd).collect();
         let total_volume: f64 = volumes.iter().sum();
-        let avg_volume = if !volumes.is_empty() { total_volume / volumes.len() as f64 } else { 0.0 };
+        let avg_volume = if !volumes.is_empty() {
+            total_volume / volumes.len() as f64
+        } else {
+            0.0
+        };
         info!("  Total 24h volume: ${:.0}", total_volume);
         info!("  Average 24h volume: ${:.0}", avg_volume);
 
         // Show liquidity thresholds
         info!("🧪 Liquidity Filters:");
-        info!("  Min 24h volume: ${:.0}", crate::config::MIN_VOLUME_24H_USD);
+        info!(
+            "  Min 24h volume: ${:.0}",
+            crate::config::MIN_VOLUME_24H_USD
+        );
         info!("  Max spread: {:.1}%", crate::config::MAX_SPREAD_PERCENT);
-        info!("  Min trade size: ${:.0}", crate::config::MIN_TRADE_AMOUNT_USD);
-        
+        info!(
+            "  Min trade size: ${:.0}",
+            crate::config::MIN_TRADE_AMOUNT_USD
+        );
+
         // Log some popular currencies
         let popular_currencies = ["USDT", "BTC", "ETH", "BNB", "USDC"];
         for currency in &popular_currencies {
             let count = self.get_pairs_with_currency(currency).len();
-            let liquid_count = self.pairs
+            let liquid_count = self
+                .pairs
                 .iter()
                 .filter(|p| p.is_liquid && (p.base == *currency || p.quote == *currency))
                 .count();
@@ -386,14 +455,21 @@ impl PairManager {
             return;
         }
 
-        let spreads: Vec<f64> = self.pairs
+        let spreads: Vec<f64> = self
+            .pairs
             .iter()
             .map(|pair| ((pair.ask_price - pair.bid_price) / pair.bid_price) * 100.0)
             .collect();
 
         let avg_spread = spreads.iter().sum::<f64>() / spreads.len() as f64;
-        let min_spread = spreads.iter().min_by(|a, b| a.partial_cmp(b).unwrap()).unwrap_or(&0.0);
-        let max_spread = spreads.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap_or(&0.0);
+        let min_spread = spreads
+            .iter()
+            .min_by(|a, b| a.partial_cmp(b).unwrap())
+            .unwrap_or(&0.0);
+        let max_spread = spreads
+            .iter()
+            .max_by(|a, b| a.partial_cmp(b).unwrap())
+            .unwrap_or(&0.0);
 
         info!("📈 Bid/Ask Spread Analysis:");
         info!("  Average spread: {:.4}%", avg_spread);
@@ -404,8 +480,10 @@ impl PairManager {
         for symbol in &major_pairs {
             if let Some(pair) = self.pairs.iter().find(|p| p.symbol == *symbol) {
                 let spread = ((pair.ask_price - pair.bid_price) / pair.bid_price) * 100.0;
-                debug!("  {} spread: {:.4}% (bid: {:.4}, ask: {:.4})", 
-                       symbol, spread, pair.bid_price, pair.ask_price);
+                debug!(
+                    "  {} spread: {:.4}% (bid: {:.4}, ask: {:.4})",
+                    symbol, spread, pair.bid_price, pair.ask_price
+                );
             }
         }
     }
@@ -446,8 +524,7 @@ impl PairStatistics {
 
         format!(
             "Pairs: {} total ({} active), {} currencies, avg price: {:.6}, updated: {}",
-            self.total_pairs, self.active_pairs, self.total_currencies, 
-            self.avg_price, last_update
+            self.total_pairs, self.active_pairs, self.total_currencies, self.avg_price, last_update
         )
     }
 }
@@ -525,7 +602,7 @@ mod tests {
 
         let triangles = manager.find_triangle_pairs("USDT");
         assert!(!triangles.is_empty());
-        
+
         // Should find USDT -> BTC -> ETH -> USDT or USDT -> ETH -> BTC -> USDT
         let first_triangle = &triangles[0];
         assert_eq!(first_triangle.base_currency, "USDT");
