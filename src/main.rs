@@ -247,7 +247,8 @@ async fn run_arbitrage_cycle(
 
     // Phase 2: Update trading pairs and prices
     // Full refresh (instruments + prices) every 2000 cycles or if empty
-    let needs_full_refresh = pair_manager.get_pairs().is_empty() || cycle_count.is_multiple_of(2000);
+    let needs_full_refresh =
+        pair_manager.get_pairs().is_empty() || cycle_count.is_multiple_of(2000);
 
     if needs_full_refresh {
         log_phase(
