@@ -11,6 +11,15 @@ on:
       - "precision_cache.json"
       - ".github/workflows/deploy-project.yml"
   workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'Development'
+        type: choice
+        options:
+          - Development
+          - Production
 
 permissions:
   contents: read
@@ -24,7 +33,7 @@ jobs:
   build-and-push:
     runs-on: ubuntu-latest
     environment:
-      name: ${{ github.ref == 'refs/heads/main' && 'Production' || 'Development' }}
+      name: ${{ inputs.environment || (github.ref == 'refs/heads/main' && 'Production' || 'Development') }}
 
     steps:
       - name: Checkout repository
@@ -40,15 +49,15 @@ jobs:
           image_name: ${{ env.IMAGE_NAME }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-          platforms: linux/arm64
+          platforms: linux/amd64
 
   deploy:
     name: Deploy to Server
     needs: build-and-push
     runs-on: ubuntu-latest
     environment:
-      name: ${{ github.ref == 'refs/heads/main' && 'Production' || 'Development' }}
-    if: github.ref == 'refs/heads/main'
+      name: ${{ inputs.environment || (github.ref == 'refs/heads/main' && 'Production' || 'Development') }}
+    if: (github.ref == 'refs/heads/main' && github.event_name == 'push') || github.event_name == 'workflow_dispatch'
 
     steps:
       - name: Checkout
@@ -62,22 +71,6 @@ jobs:
           oci_user_ocid: ${{ secrets.OCI_USER_OCID }}
           oci_fingerprint: ${{ secrets.OCI_FINGERPRINT }}
           oci_region: ${{ secrets.OCI_REGION }}
-
-      - name: Install OCI CLI
-        run: |
-          mkdir -p ~/.oci
-          # The assume-oci-role action creates oci_api_key.pem and sets env vars
-          # We need to create a config file for the CLI to work
-          echo "[DEFAULT]" > ~/.oci/config
-          echo "user=${{ secrets.OCI_USER_OCID }}" >> ~/.oci/config
-          echo "fingerprint=${{ secrets.OCI_FINGERPRINT }}" >> ~/.oci/config
-          echo "key_file=$TF_VAR_private_key" >> ~/.oci/config
-          echo "tenancy=${{ secrets.OCI_TENANCY_OCID }}" >> ~/.oci/config
-          echo "region=${{ secrets.OCI_REGION }}" >> ~/.oci/config
-
-          # Fix permissions
-          chmod 600 ~/.oci/config
-          chmod 600 $TF_VAR_private_key
 
       - name: Get Instance IP
         id: get-ip
