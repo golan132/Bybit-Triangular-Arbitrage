@@ -29,7 +29,11 @@ runs:
       run: |
         echo "${{ inputs.oci_private_key }}" > $GITHUB_WORKSPACE/oci_api_key.pem
         chmod 600 $GITHUB_WORKSPACE/oci_api_key.pem
-        echo "TF_VAR_private_key=${{ inputs.oci_private_key }}" >> $GITHUB_ENV
+        
+        # Multiline secrets must be handled carefully in GITHUB_ENV
+        echo "TF_VAR_private_key<<EOF" >> $GITHUB_ENV
+        echo "${{ inputs.oci_private_key }}" >> $GITHUB_ENV
+        echo "EOF" >> $GITHUB_ENV
 
     - name: Set Terraform Environment Variables
       shell: bash

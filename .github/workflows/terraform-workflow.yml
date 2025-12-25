@@ -7,6 +7,15 @@ on:
       - "infrastructure/**"
       - ".github/workflows/terraform-workflow.yml"
   workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'Development'
+        type: choice
+        options:
+          - Development
+          - Production
 
 permissions:
   issues: write
@@ -17,7 +26,7 @@ jobs:
     name: "Terraform Plan"
     runs-on: ubuntu-latest
     environment:
-      name: ${{ github.ref == 'refs/heads/main' && 'Production' || 'Development' }}
+      name: ${{ inputs.environment || (github.ref == 'refs/heads/main' && 'Production' || 'Development') }}
     defaults:
       run:
         working-directory: ./infrastructure
@@ -29,7 +38,19 @@ jobs:
       - name: Set Environment
         id: set-env
         run: |
-          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+          # Determine environment from input or branch
+          TARGET_ENV="${{ inputs.environment }}"
+          if [[ -z "$TARGET_ENV" ]]; then
+            if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+              TARGET_ENV="Production"
+            else
+              TARGET_ENV="Development"
+            fi
+          fi
+          
+          echo "Selected Environment: $TARGET_ENV"
+          
+          if [[ "$TARGET_ENV" == "Production" ]]; then
             echo "TF_VAR_FILE=environments/prod/prod.tfvars" >> $GITHUB_ENV
           else
             echo "TF_VAR_FILE=environments/dev/dev.tfvars" >> $GITHUB_ENV
