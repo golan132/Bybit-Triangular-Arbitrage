@@ -18,9 +18,12 @@ resource "oci_core_instance" "bot_instance" {
   display_name        = "bybit-bot-instance"
   shape               = var.instance_shape
 
-  shape_config {
-    ocpus         = var.instance_ocpus
-    memory_in_gbs = var.instance_memory_in_gbs
+  dynamic "shape_config" {
+    for_each = length(regexall("Flex", var.instance_shape)) > 0 ? [1] : []
+    content {
+      ocpus         = var.instance_ocpus
+      memory_in_gbs = var.instance_memory_in_gbs
+    }
   }
 
   create_vnic_details {
