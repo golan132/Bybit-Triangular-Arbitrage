@@ -40,6 +40,26 @@ async fn main() -> Result<()> {
     let client = BybitClient::new(config.clone()).context("Failed to create Bybit client")?;
     log_success("Initialization", "Bybit client created successfully");
 
+    // Wait for API connection (IP whitelist check)
+    log_phase("init", "Verifying API connection and IP whitelist...");
+    loop {
+        match client.get_wallet_balance(None).await {
+            Ok(_) => {
+                log_success("Initialization", "API connection verified successfully");
+                break;
+            }
+            Err(e) => {
+                let error_msg = e.to_string();
+                warn!("⚠️ API Connection Failed: {error_msg}");
+                if error_msg.contains("10010") || error_msg.contains("IP") {
+                    warn!("🚫 IP Restriction detected. Please whitelist this IP in Bybit API settings.");
+                }
+                warn!("🔄 Retrying in 10 seconds...");
+                sleep(Duration::from_secs(10)).await;
+            }
+        }
+    }
+
     // Initialize managers and trader
     let mut balance_manager = BalanceManager::new();
     let mut pair_manager = PairManager::new();
@@ -58,10 +78,16 @@ async fn main() -> Result<()> {
         warn!("⚠️ Failed to load precision cache: {e}");
     }
 
-    precision_manager
-        .initialize(&client)
-        .await
-        .context("Failed to initialize precision manager")?;
+    loop {
+        match precision_manager.initialize(&client).await {
+            Ok(_) => break,
+            Err(e) => {
+                warn!("⚠️ Failed to initialize precision manager: {e}");
+                warn!("🔄 Retrying in 5 seconds...");
+                sleep(Duration::from_secs(5)).await;
+            }
+        }
+    }
     precision_manager.print_precision_summary();
 
     // Display precision cache statistics
@@ -89,10 +115,16 @@ async fn main() -> Result<()> {
 
     // Initial pair fetch to populate symbols
     log_phase("init", "Fetching initial trading pairs");
-    pair_manager
-        .update_pairs_and_prices(&client)
-        .await
-        .context("Failed to fetch initial pairs")?;
+    loop {
+        match pair_manager.update_pairs_and_prices(&client).await {
+            Ok(_) => break,
+            Err(e) => {
+                warn!("⚠️ Failed to fetch initial pairs: {e}");
+                warn!("🔄 Retrying in 5 seconds...");
+                sleep(Duration::from_secs(5)).await;
+            }
+        }
+    }
 
     // Setup WebSocket
     let (tx, mut rx) = tokio::sync::mpsc::channel(10000);
