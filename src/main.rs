@@ -220,7 +220,7 @@ async fn main() -> Result<()> {
                 }
                 // Run continuously without delay for live arbitrage scanning
                 // Add a small delay to prevent overwhelming the API
-                sleep(Duration::from_millis(500)).await;
+                // sleep(Duration::from_millis(500)).await;
             }
         }
     }
@@ -395,6 +395,7 @@ async fn run_arbitrage_cycle(
                             } else {
                                 warn!("⏳ Trade {trades_completed}/{max_trades} completed, continuing to look for next opportunity...");
                             }
+                        } else {
                             let error_msg = result
                                 .error_message
                                 .unwrap_or_else(|| "Unknown error".to_string());

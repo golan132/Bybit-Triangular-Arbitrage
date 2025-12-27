@@ -129,7 +129,7 @@ jobs:
             # Run new container
             docker run -d \
               --name bot \
-              --restart always \
+              --restart on-failure \
               --network host \
               -e BYBIT_API_KEY=${{ secrets.BYBIT_API_KEY }} \
               -e BYBIT_API_SECRET=${{ secrets.BYBIT_API_SECRET }} \

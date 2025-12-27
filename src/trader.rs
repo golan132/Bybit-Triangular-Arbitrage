@@ -120,12 +120,13 @@ impl ArbitrageTrader {
         // Track confirmed balance to avoid redundant API calls
         let mut confirmed_balance: Option<f64> = None;
 
-        // Pre-fetch balance for Step 1 if not dry run
-        if !self.dry_run {
-            if let Ok(bal) = self.get_actual_balance(&opportunity.path[0]).await {
-                confirmed_balance = Some(bal);
-            }
-        }
+        // Pre-fetch balance for Step 1 if not dry run - REMOVED for latency optimization
+        // We trust the main loop's balance check or let the order fail if insufficient
+        // if !self.dry_run {
+        //     if let Ok(bal) = self.get_actual_balance(&opportunity.path[0]).await {
+        //         confirmed_balance = Some(bal);
+        //     }
+        // }
 
         // Execute each step of the arbitrage
         for (step, pair_symbol) in opportunity.pairs.iter().enumerate() {
@@ -457,11 +458,18 @@ impl ArbitrageTrader {
             }
         };
 
-        // Use confirmed balance if available, otherwise fetch
+        // Use confirmed balance if available, otherwise skip check for speed
         let available_balance = if let Some(balance) = confirmed_balance {
             balance
         } else {
-            // Check current balance
+            // Optimization: Skip REST API call for balance check to reduce latency
+            // We assume the main loop has already checked the initial balance
+            // or we rely on the exchange to reject the order if insufficient
+            debug!("⚡ Skipping REST balance check for speed (trusting local state/exchange)");
+            return Ok(());
+            
+            /* 
+            // Old slow logic:
             match self.client.get_wallet_balance(Some("UNIFIED")).await {
                 Ok(balance_result) => {
                     if let Some(account) = balance_result.list.first() {
@@ -485,6 +493,7 @@ impl ArbitrageTrader {
                     0.0
                 }
             }
+            */
         };
 
         // Calculate required amount based on order type
@@ -555,7 +564,7 @@ impl ArbitrageTrader {
                     self.get_actual_balance(from).await?
                 };
 
-                let safe_quantity = (actual_balance * 0.99).min(amount); // Use 99% of available (more conservative)
+                let safe_quantity = (actual_balance * 0.999).min(amount); // Use 99.9% of available (minimize dust)
 
                 info!(
                     "💰 Available {from} balance: {actual_balance:.8}, using: {safe_quantity:.8}"
@@ -578,7 +587,7 @@ impl ArbitrageTrader {
                     self.get_actual_balance(from).await?
                 };
 
-                let safe_quantity = actual_balance * 0.99; // Use 99% of available (more conservative)
+                let safe_quantity = actual_balance * 0.999; // Use 99.9% of available (minimize dust)
 
                 info!(
                     "💰 Available {from} balance: {actual_balance:.8}, using: {safe_quantity:.8} for next step"

@@ -105,28 +105,40 @@ impl BybitWebsocket {
                                                     // Check topic to decide how to parse
                                                     if let Some(topic) = &response.topic {
                                                         if topic.starts_with("orderbook.1") {
-                                                            match serde_json::from_value::<OrderbookData>(data_val.clone()) {
+                                                            match serde_json::from_value::<OrderbookData>(data_val) {
                                                                 Ok(ob) => {
-                                                                    // Convert to TickerInfo using serde_json::json!
-                                                                    // We only care about symbol, bid1, ask1
-                                                                    let ticker_json = serde_json::json!({
-                                                                        "symbol": ob.s,
-                                                                        "bid1Price": ob.b.first().map(|v| v[0].clone()),
-                                                                        "bid1Size": ob.b.first().map(|v| v[1].clone()),
-                                                                        "ask1Price": ob.a.first().map(|v| v[0].clone()),
-                                                                        "ask1Size": ob.a.first().map(|v| v[1].clone())
-                                                                    });
+                                                                    // Direct conversion to TickerInfo without intermediate JSON serialization
+                                                                    let ticker = TickerInfo {
+                                                                        symbol: ob.s,
+                                                                        bid1_price: ob.b.first().map(|v| v[0].clone()),
+                                                                        bid1_size: ob.b.first().map(|v| v[1].clone()),
+                                                                        ask1_price: ob.a.first().map(|v| v[0].clone()),
+                                                                        ask1_size: ob.a.first().map(|v| v[1].clone()),
+                                                                        // Initialize other fields as None since we don't get them from orderbook
+                                                                        last_price: None,
+                                                                        prev_price_24h: None,
+                                                                        price_24h_pcnt: None,
+                                                                        high_price_24h: None,
+                                                                        low_price_24h: None,
+                                                                        prev_price_1h: None,
+                                                                        mark_price: None,
+                                                                        index_price: None,
+                                                                        open_interest: None,
+                                                                        open_interest_value: None,
+                                                                        turnover24h: None,
+                                                                        volume24h: None,
+                                                                        funding_rate: None,
+                                                                        next_funding_time: None,
+                                                                        predicted_delivery_price: None,
+                                                                        basis_rate: None,
+                                                                        delivery_fee_rate: None,
+                                                                        delivery_time: None,
+                                                                        basis: None,
+                                                                    };
 
-                                                                    match serde_json::from_value::<TickerInfo>(ticker_json) {
-                                                                        Ok(ticker) => {
-                                                                            if let Err(e) = self.sender.send(ticker).await {
-                                                                                error!("Failed to send ticker update: {e}");
-                                                                                break;
-                                                                            }
-                                                                        }
-                                                                        Err(e) => {
-                                                                            warn!("Failed to convert orderbook to ticker: {e}");
-                                                                        }
+                                                                    if let Err(e) = self.sender.send(ticker).await {
+                                                                        error!("Failed to send ticker update: {e}");
+                                                                        break;
                                                                     }
                                                                 }
                                                                 Err(e) => {
