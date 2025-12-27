@@ -84,11 +84,11 @@ impl ArbitrageEngine {
             })
             .collect();
 
-        let mut total_scanned = 0;
+        let mut _total_scanned = 0;
         let mut cycle_best: Option<ArbitrageOpportunity> = None;
 
         for (scanned, opps, best_in_coin) in results {
-            total_scanned += scanned;
+            _total_scanned += scanned;
             self.opportunities.extend(opps);
 
             if let Some(best) = best_in_coin {
@@ -115,7 +115,7 @@ impl ArbitrageEngine {
         // Log best opportunities
         if let Some(best) = &cycle_best {
             debug!(
-                "📉 Cycle Best: {:.4}% via {} (Prices: {:?})",
+                "📉 Scan Best: {:.4}% via {} (Prices: {:?})",
                 best.estimated_profit_pct,
                 best.display_pairs(),
                 best.prices
@@ -138,11 +138,11 @@ impl ArbitrageEngine {
         });
 
         // Only log detailed scan results occasionally
-        debug!(
-            "🔁 Found {} potential arbitrage opportunities from {} triangles scanned",
-            self.opportunities.len(),
-            total_scanned
-        );
+        // debug!(
+        //     "🔁 Found {} potential arbitrage opportunities from {} triangles scanned",
+        //     self.opportunities.len(),
+        //     total_scanned
+        // );
 
         self.opportunities.clone()
     }
@@ -187,7 +187,7 @@ impl ArbitrageEngine {
             scanned_count += 1;
         }
 
-        debug!("Scanned {} triangles for {}", scanned_count, base_currency);
+        // debug!("Scanned {} triangles for {}", scanned_count, base_currency);
         (scanned_count, found_opportunities, best_opp)
     }
 

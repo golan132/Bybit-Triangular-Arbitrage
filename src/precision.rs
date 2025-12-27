@@ -118,7 +118,7 @@ impl PrecisionManager {
                 qty_precision = 0;
             }
 
-            let price_precision = self
+            let _price_precision = self
                 .extract_precision_from_step(
                     &instrument
                         .price_filter
@@ -139,7 +139,7 @@ impl PrecisionManager {
                 .map(|f| f.max_order_qty.parse::<f64>().unwrap_or(0.0))
                 .unwrap_or(0.0);
 
-            let qty_step = instrument
+            let _qty_step = instrument
                 .lot_size_filter
                 .as_ref()
                 .and_then(|f| f.qty_step.as_ref())
@@ -161,10 +161,10 @@ impl PrecisionManager {
                 max_order_qty,
             };
 
-            debug!(
-                "📊 {} precision: qty={} decimals, price={} decimals, step={:.8}",
-                instrument.symbol, qty_precision, price_precision, qty_step
-            );
+            // debug!(
+            //     "📊 {} precision: qty={} decimals, price={} decimals, step={:.8}",
+            //     instrument.symbol, qty_precision, price_precision, qty_step
+            // );
 
             // Store symbol precision
             self.symbol_precision

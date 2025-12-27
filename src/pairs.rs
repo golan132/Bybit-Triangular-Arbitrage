@@ -37,6 +37,14 @@ impl PairManager {
     }
 
     pub fn update_from_ticker(&mut self, ticker: &crate::models::TickerInfo) {
+        // if ticker.symbol == "BTCUSDT" || ticker.symbol == "ETHUSDT" {
+        //     info!(
+        //         "Received ticker for {}: last={:?}, bid={:?}, ask={:?}",
+        //         ticker.symbol, ticker.last_price, ticker.bid1_price, ticker.ask1_price
+        //     );
+        // }
+        // trace!("Updating ticker for {}", ticker.symbol);
+
         // Try to get price from last_price, or keep existing if not present
         let price_opt = ticker
             .last_price
@@ -82,6 +90,17 @@ impl PairManager {
                         pair.spread_percent =
                             ((pair.ask_price - pair.bid_price) / pair.bid_price) * 100.0;
                     }
+
+                    // Debug log for specific pair to verify updates
+                    // if pair.symbol == "BTCUSDT" || pair.symbol == "ETHUSDT" {
+                    //     debug!(
+                    //         "Updated {}: price={}, bid={}, ask={}",
+                    //         pair.symbol, pair.price, pair.bid_price, pair.ask_price
+                    //     );
+                    // }
+                } else {
+                    // Log if we got a ticker but no price update (maybe just volume?)
+                    // debug!("Ticker for {} had no bid/ask update", ticker.symbol);
                 }
 
                 // Update volume if available

@@ -13,13 +13,24 @@ const PING_INTERVAL: u64 = 20;
 
 #[derive(Debug, Deserialize)]
 struct WsResponse {
-    _topic: Option<String>,
+    topic: Option<String>,
     #[serde(rename = "type")]
-    _msg_type: Option<String>,
-    data: Option<TickerInfo>,
+    #[allow(dead_code)]
+    msg_type: Option<String>,
+    data: Option<serde_json::Value>, // Change to Value to handle both single object and array
     success: Option<bool>,
     ret_msg: Option<String>,
-    _op: Option<String>,
+    #[allow(dead_code)]
+    op: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OrderbookData {
+    s: String,
+    #[serde(default)]
+    b: Vec<Vec<String>>,
+    #[serde(default)]
+    a: Vec<Vec<String>>,
 }
 
 pub struct BybitWebsocket {
@@ -47,12 +58,12 @@ impl BybitWebsocket {
                     info!("[Conn #{}] Connected to Bybit WebSocket", self.id);
                     let (mut write, mut read) = ws_stream.split();
 
-                    // Subscribe to tickers
+                    // Subscribe to orderbook (depth 1) for best bid/ask
                     // Bybit allows max 10 args per request. We need to chunk subscriptions.
                     let mut subscribed_count = 0;
                     for chunk in self.symbols.chunks(10) {
                         let args: Vec<String> =
-                            chunk.iter().map(|s| format!("tickers.{s}")).collect();
+                            chunk.iter().map(|s| format!("orderbook.1.{s}")).collect();
                         let subscribe_msg = serde_json::json!({
                             "op": "subscribe",
                             "args": args
@@ -68,7 +79,7 @@ impl BybitWebsocket {
                         subscribed_count += chunk.len();
                     }
                     info!(
-                        "[Conn #{}] Subscribed to {} symbols",
+                        "[Conn #{}] Subscribed to {} symbols (Orderbook)",
                         self.id, subscribed_count
                     );
 
@@ -90,10 +101,52 @@ impl BybitWebsocket {
                                     Some(Ok(Message::Text(text))) => {
                                         match serde_json::from_str::<WsResponse>(&text) {
                                             Ok(response) => {
-                                                if let Some(data) = response.data {
-                                                    if let Err(e) = self.sender.send(data).await {
-                                                        error!("Failed to send ticker update: {e}");
-                                                        break;
+                                                if let Some(data_val) = response.data {
+                                                    // Check topic to decide how to parse
+                                                    if let Some(topic) = &response.topic {
+                                                        if topic.starts_with("orderbook.1") {
+                                                            match serde_json::from_value::<OrderbookData>(data_val.clone()) {
+                                                                Ok(ob) => {
+                                                                    // Convert to TickerInfo using serde_json::json!
+                                                                    // We only care about symbol, bid1, ask1
+                                                                    let ticker_json = serde_json::json!({
+                                                                        "symbol": ob.s,
+                                                                        "bid1Price": ob.b.first().map(|v| v[0].clone()),
+                                                                        "bid1Size": ob.b.first().map(|v| v[1].clone()),
+                                                                        "ask1Price": ob.a.first().map(|v| v[0].clone()),
+                                                                        "ask1Size": ob.a.first().map(|v| v[1].clone())
+                                                                    });
+
+                                                                    match serde_json::from_value::<TickerInfo>(ticker_json) {
+                                                                        Ok(ticker) => {
+                                                                            if let Err(e) = self.sender.send(ticker).await {
+                                                                                error!("Failed to send ticker update: {e}");
+                                                                                break;
+                                                                            }
+                                                                        }
+                                                                        Err(e) => {
+                                                                            warn!("Failed to convert orderbook to ticker: {e}");
+                                                                        }
+                                                                    }
+                                                                }
+                                                                Err(e) => {
+                                                                    warn!("Failed to deserialize orderbook data: {e}");
+                                                                }
+                                                            }
+                                                        } else {
+                                                            // Fallback for tickers topic if we ever use it
+                                                            match serde_json::from_value::<TickerInfo>(data_val.clone()) {
+                                                                Ok(ticker) => {
+                                                                    if let Err(e) = self.sender.send(ticker).await {
+                                                                        error!("Failed to send ticker update: {e}");
+                                                                        break;
+                                                                    }
+                                                                }
+                                                                Err(e) => {
+                                                                    warn!("Failed to deserialize ticker data: {e}. Data: {:?}", data_val);
+                                                                }
+                                                            }
+                                                        }
                                                     }
                                                 } else if let Some(success) = response.success {
                                                     if !success {

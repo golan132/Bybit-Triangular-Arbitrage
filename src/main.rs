@@ -31,6 +31,10 @@ async fn main() -> Result<()> {
 
     // Initialize logging
     init_logger().context("Failed to initialize logger")?;
+
+    // Check latency to Bybit API
+    check_api_latency().await;
+
     // Load configuration
     log_phase("init", "Loading configuration");
     let config = Config::from_env().context("Failed to load configuration")?;
@@ -39,6 +43,29 @@ async fn main() -> Result<()> {
     // Create Bybit client
     let client = BybitClient::new(config.clone()).context("Failed to create Bybit client")?;
     log_success("Initialization", "Bybit client created successfully");
+
+    // Wait for API connection (IP whitelist check)
+    log_phase("init", "Verifying API connection and IP whitelist...");
+    loop {
+        match client.get_wallet_balance(None).await {
+            Ok(_) => {
+                log_success("Initialization", "API connection verified successfully");
+                break;
+            }
+            Err(e) => {
+                let error_msg = e.to_string();
+                warn!("⚠️ API Connection Failed: {error_msg}");
+                if error_msg.contains("10010")
+                    || error_msg.contains("IP")
+                    || error_msg.contains("401")
+                {
+                    warn!("🚫 IP Restriction or Unauthorized detected. Please whitelist this IP in Bybit API settings.");
+                }
+                warn!("🔄 Retrying in 30 seconds...");
+                sleep(Duration::from_secs(30)).await;
+            }
+        }
+    }
 
     // Initialize managers and trader
     let mut balance_manager = BalanceManager::new();
@@ -58,10 +85,16 @@ async fn main() -> Result<()> {
         warn!("⚠️ Failed to load precision cache: {e}");
     }
 
-    precision_manager
-        .initialize(&client)
-        .await
-        .context("Failed to initialize precision manager")?;
+    loop {
+        match precision_manager.initialize(&client).await {
+            Ok(_) => break,
+            Err(e) => {
+                warn!("⚠️ Failed to initialize precision manager: {e}");
+                warn!("🔄 Retrying in 5 seconds...");
+                sleep(Duration::from_secs(5)).await;
+            }
+        }
+    }
     precision_manager.print_precision_summary();
 
     // Display precision cache statistics
@@ -89,10 +122,16 @@ async fn main() -> Result<()> {
 
     // Initial pair fetch to populate symbols
     log_phase("init", "Fetching initial trading pairs");
-    pair_manager
-        .update_pairs_and_prices(&client)
-        .await
-        .context("Failed to fetch initial pairs")?;
+    loop {
+        match pair_manager.update_pairs_and_prices(&client).await {
+            Ok(_) => break,
+            Err(e) => {
+                warn!("⚠️ Failed to fetch initial pairs: {e}");
+                warn!("🔄 Retrying in 5 seconds...");
+                sleep(Duration::from_secs(5)).await;
+            }
+        }
+    }
 
     // Setup WebSocket
     let (tx, mut rx) = tokio::sync::mpsc::channel(10000);
@@ -429,6 +468,38 @@ async fn run_arbitrage_cycle(
     }
 
     Ok(false) // Continue running unless trade was executed
+}
+
+async fn check_api_latency() {
+    info!("⚡ Checking latency to Bybit API (api.bybit.com)...");
+    let start = Instant::now();
+    match reqwest::get("https://api.bybit.com/v5/market/time").await {
+        Ok(resp) => {
+            let duration = start.elapsed();
+            let status = resp.status();
+            if status.is_success() {
+                info!(
+                    "✅ API Latency: {:.2}ms (Status: {})",
+                    duration.as_secs_f64() * 1000.0,
+                    status
+                );
+                if duration.as_millis() < 50 {
+                    info!("🚀 Excellent connection! Server is likely close to Bybit edge node.");
+                } else if duration.as_millis() < 200 {
+                    info!("👌 Good connection.");
+                } else {
+                    warn!("⚠️ High latency detected (>200ms). This might affect arbitrage performance.");
+                }
+            } else {
+                warn!(
+                    "⚠️ API reachable but returned error status: {} (Latency: {:.2}ms)",
+                    status,
+                    duration.as_secs_f64() * 1000.0
+                );
+            }
+        }
+        Err(e) => warn!("❌ Failed to ping Bybit API: {}", e),
+    }
 }
 
 /// Create a sample .env file for configuration
