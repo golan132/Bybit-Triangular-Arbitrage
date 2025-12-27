@@ -467,8 +467,8 @@ impl ArbitrageTrader {
             // or we rely on the exchange to reject the order if insufficient
             debug!("⚡ Skipping REST balance check for speed (trusting local state/exchange)");
             return Ok(());
-            
-            /* 
+
+            /*
             // Old slow logic:
             match self.client.get_wallet_balance(Some("UNIFIED")).await {
                 Ok(balance_result) => {
