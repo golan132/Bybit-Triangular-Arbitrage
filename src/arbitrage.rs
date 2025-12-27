@@ -1,5 +1,4 @@
 use crate::balance::BalanceManager;
-use crate::config::{MAX_TRIANGLES_TO_SCAN, MIN_PROFIT_THRESHOLD};
 use crate::models::ArbitrageOpportunity;
 use crate::pairs::{PairManager, TriangleDefinition};
 use chrono::Utc;
@@ -18,8 +17,8 @@ impl ArbitrageEngine {
     pub fn new() -> Self {
         Self {
             opportunities: Vec::new(),
-            profit_threshold: MIN_PROFIT_THRESHOLD,
-            max_scan_count: MAX_TRIANGLES_TO_SCAN,
+            profit_threshold: 0.05,
+            max_scan_count: 2000,
             trading_fee_rate: 0.001, // 0.1% trading fee
             global_best: None,
         }
@@ -207,27 +206,27 @@ impl ArbitrageEngine {
         let p3 = &pair_manager.pairs[triangle.indices[2]];
 
         let pairs = [p1, p2, p3];
-        let min_trade_size_usd = test_amount.max(crate::config::MIN_TRADE_AMOUNT_USD);
+        let min_trade_size_usd = test_amount.max(pair_manager.config.min_trade_amount_usd);
 
         for pair in &pairs {
             // Volume filter - must have sufficient 24h volume
-            if pair.volume_24h_usd < crate::config::MIN_VOLUME_24H_USD {
+            if pair.volume_24h_usd < pair_manager.config.min_volume_24h_usd {
                 // debug!(
                 //     "❌ {} failed volume check: ${:.0} < ${:.0}",
                 //     pair.symbol,
                 //     pair.volume_24h_usd,
-                //     crate::config::MIN_VOLUME_24H_USD
+                //     pair_manager.config.min_volume_24h_usd
                 // );
                 return false;
             }
 
             // Spread filter - spread must be reasonable
-            if pair.spread_percent > crate::config::MAX_SPREAD_PERCENT {
+            if pair.spread_percent > pair_manager.config.max_spread_percent {
                 // debug!(
                 //     "❌ {} failed spread check: {:.2}% > {:.2}%",
                 //     pair.symbol,
                 //     pair.spread_percent,
-                //     crate::config::MAX_SPREAD_PERCENT
+                //     pair_manager.config.max_spread_percent
                 // );
                 return false;
             }
@@ -527,7 +526,7 @@ mod tests {
     fn test_arbitrage_engine_creation() {
         let engine = ArbitrageEngine::new();
         assert_eq!(engine.opportunities.len(), 0);
-        assert_eq!(engine.profit_threshold, MIN_PROFIT_THRESHOLD);
+        assert_eq!(engine.profit_threshold, 0.05);
     }
 
     #[test]

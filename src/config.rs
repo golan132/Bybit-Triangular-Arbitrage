@@ -13,6 +13,15 @@ pub struct Config {
     pub order_size: f64,
     pub min_profit_threshold: f64,
     pub trading_fee_rate: f64,
+    pub max_triangles_to_scan: usize,
+    pub balance_refresh_interval_secs: u64,
+    pub price_refresh_interval_secs: u64,
+    pub cycle_summary_interval: usize,
+    pub min_volume_24h_usd: f64,
+    pub min_bid_size_usd: f64,
+    pub min_ask_size_usd: f64,
+    pub max_spread_percent: f64,
+    pub min_trade_amount_usd: f64,
 }
 
 impl Config {
@@ -58,9 +67,54 @@ impl Config {
             .unwrap_or(0.05);
 
         let trading_fee_rate = env::var("TRADING_FEE_RATE")
-            .unwrap_or_else(|_| "0.0015".to_string())
+            .unwrap_or_else(|_| "0.00075".to_string())
             .parse::<f64>()
-            .unwrap_or(0.0015);
+            .unwrap_or(0.00075);
+
+        let max_triangles_to_scan = env::var("MAX_TRIANGLES_TO_SCAN")
+            .unwrap_or_else(|_| "2000".to_string())
+            .parse::<usize>()
+            .unwrap_or(2000);
+
+        let balance_refresh_interval_secs = env::var("BALANCE_REFRESH_INTERVAL_SECS")
+            .unwrap_or_else(|_| "60".to_string())
+            .parse::<u64>()
+            .unwrap_or(60);
+
+        let price_refresh_interval_secs = env::var("PRICE_REFRESH_INTERVAL_SECS")
+            .unwrap_or_else(|_| "2".to_string())
+            .parse::<u64>()
+            .unwrap_or(2);
+
+        let cycle_summary_interval = env::var("CYCLE_SUMMARY_INTERVAL")
+            .unwrap_or_else(|_| "100".to_string())
+            .parse::<usize>()
+            .unwrap_or(100);
+
+        let min_volume_24h_usd = env::var("MIN_VOLUME_24H_USD")
+            .unwrap_or_else(|_| "2000.0".to_string())
+            .parse::<f64>()
+            .unwrap_or(2000.0);
+
+        let min_bid_size_usd = env::var("MIN_BID_SIZE_USD")
+            .unwrap_or_else(|_| "100.0".to_string())
+            .parse::<f64>()
+            .unwrap_or(100.0);
+
+        let min_ask_size_usd = env::var("MIN_ASK_SIZE_USD")
+            .unwrap_or_else(|_| "50.0".to_string())
+            .parse::<f64>()
+            .unwrap_or(50.0);
+
+        let max_spread_percent = env::var("MAX_SPREAD_PERCENT")
+            .unwrap_or_else(|_| "1.0".to_string())
+            .parse::<f64>()
+            .unwrap_or(1.0);
+
+        let min_trade_amount_usd = env::var("MIN_TRADE_AMOUNT_USD")
+            .unwrap_or_else(|_| "10.0".to_string())
+            .parse::<f64>()
+            .unwrap_or(10.0);
 
         Ok(Config {
             api_key,
@@ -72,6 +126,15 @@ impl Config {
             order_size,
             min_profit_threshold,
             trading_fee_rate,
+            max_triangles_to_scan,
+            balance_refresh_interval_secs,
+            price_refresh_interval_secs,
+            cycle_summary_interval,
+            min_volume_24h_usd,
+            min_bid_size_usd,
+            min_ask_size_usd,
+            max_spread_percent,
+            min_trade_amount_usd,
         })
     }
 
@@ -90,20 +153,6 @@ impl Config {
         format!("{}/v5/market/tickers", self.base_url)
     }
 }
-
-// Constants for arbitrage calculations
-pub const MIN_PROFIT_THRESHOLD: f64 = 0.05; // Show any profit above 0.05%
-pub const MAX_TRIANGLES_TO_SCAN: usize = 2000; // Maximum triangles to process
-pub const BALANCE_REFRESH_INTERVAL_SECS: u64 = 60; // 1 minute
-pub const PRICE_REFRESH_INTERVAL_SECS: u64 = 2; // 2 seconds
-pub const CYCLE_SUMMARY_INTERVAL: usize = 100; // Log summary every 100 cycles
-
-// Realistic trading filters
-pub const MIN_VOLUME_24H_USD: f64 = 10000.0; // Minimum 24h volume in USD for liquidity (increased for safety)
-pub const MIN_BID_SIZE_USD: f64 = 100.0; // Minimum bid size in USD (lowered)
-pub const MIN_ASK_SIZE_USD: f64 = 100.0; // Minimum ask size in USD (lowered)
-pub const MAX_SPREAD_PERCENT: f64 = 1.0; // Maximum bid/ask spread percentage (decreased for tighter spreads)
-pub const MIN_TRADE_AMOUNT_USD: f64 = 10.0; // Minimum trade amount for realistic execution
 
 // Blacklisted tokens that should be excluded from arbitrage (geographical restrictions, etc.)
 pub const BLACKLISTED_TOKENS: &[&str] = &[

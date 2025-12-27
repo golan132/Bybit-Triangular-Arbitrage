@@ -41,7 +41,7 @@ async fn main() -> Result<()> {
     // Load configuration
     log_phase("init", "Loading configuration");
     let config = Config::from_env().context("Failed to load configuration")?;
-    log_startup_info(config.min_profit_threshold, config.trading_fee_rate);
+    log_startup_info(&config);
 
     // Create Bybit client
     let client = BybitClient::new(config.clone()).context("Failed to create Bybit client")?;
@@ -72,10 +72,10 @@ async fn main() -> Result<()> {
 
     // Initialize managers and trader
     let mut balance_manager = BalanceManager::new();
-    let mut pair_manager = PairManager::new();
+    let mut pair_manager = PairManager::new(config.clone());
     let mut arbitrage_engine = ArbitrageEngine::with_config(
         config.min_profit_threshold,
-        1000, // max_scan_count
+        config.max_triangles_to_scan,
         config.trading_fee_rate,
     );
 
@@ -208,6 +208,7 @@ async fn main() -> Result<()> {
                 break;
             }
             res = scan_arbitrage_cycle(
+                &config,
                 &client,
                 &mut balance_manager,
                 &mut pair_manager,
@@ -323,6 +324,7 @@ async fn main() -> Result<()> {
 
 #[allow(clippy::too_many_arguments)]
 async fn scan_arbitrage_cycle(
+    config: &Config,
     client: &BybitClient,
     balance_manager: &mut BalanceManager,
     pair_manager: &mut PairManager,
@@ -341,7 +343,7 @@ async fn scan_arbitrage_cycle(
 
     // Phase 1: Update account balances
     let mut balance_updated = false;
-    if balance_manager.needs_refresh(config::BALANCE_REFRESH_INTERVAL_SECS) {
+    if balance_manager.needs_refresh(config.balance_refresh_interval_secs) {
         if cycle_count.is_multiple_of(100) {
             log_phase("balance", "Refreshing account balances");
         }
@@ -456,7 +458,7 @@ async fn scan_arbitrage_cycle(
     }
 
     // Only log cycle summary every 300 cycles
-    if cycle_count.is_multiple_of(crate::config::CYCLE_SUMMARY_INTERVAL as u64) {
+    if cycle_count.is_multiple_of(config.cycle_summary_interval as u64) {
         let cycle_duration = cycle_start.elapsed();
         log_performance_metrics(
             "Arbitrage scan",

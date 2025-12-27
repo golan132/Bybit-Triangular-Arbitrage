@@ -138,6 +138,15 @@ jobs:
               -e MAX_TRADES=${{ vars.MAX_TRADES || '10' }} \
               -e ORDER_SIZE=${{ vars.ORDER_SIZE || '10' }} \
               -e MIN_PROFIT_THRESHOLD=${{ vars.MIN_PROFIT_THRESHOLD || '0.01' }} \
-              -e TRADING_FEE_RATE=${{ vars.TRADING_FEE_RATE || '0.001' }} \
+              -e TRADING_FEE_RATE=${{ vars.TRADING_FEE_RATE || '0.00075' }} \
+              -e MAX_TRIANGLES_TO_SCAN=${{ vars.MAX_TRIANGLES_TO_SCAN || '2000' }} \
+              -e BALANCE_REFRESH_INTERVAL_SECS=${{ vars.BALANCE_REFRESH_INTERVAL_SECS || '60' }} \
+              -e PRICE_REFRESH_INTERVAL_SECS=${{ vars.PRICE_REFRESH_INTERVAL_SECS || '2' }} \
+              -e CYCLE_SUMMARY_INTERVAL=${{ vars.CYCLE_SUMMARY_INTERVAL || '100' }} \
+              -e MIN_VOLUME_24H_USD=${{ vars.MIN_VOLUME_24H_USD || '2000.0' }} \
+              -e MIN_BID_SIZE_USD=${{ vars.MIN_BID_SIZE_USD || '100.0' }} \
+              -e MIN_ASK_SIZE_USD=${{ vars.MIN_ASK_SIZE_USD || '50.0' }} \
+              -e MAX_SPREAD_PERCENT=${{ vars.MAX_SPREAD_PERCENT || '1.0' }} \
+              -e MIN_TRADE_AMOUNT_USD=${{ vars.MIN_TRADE_AMOUNT_USD || '10.0' }} \
               -e RUST_LOG=${{ vars.RUST_LOG || 'info' }} \
               ghcr.io/${{ steps.repo_name.outputs.image_name }}:latest

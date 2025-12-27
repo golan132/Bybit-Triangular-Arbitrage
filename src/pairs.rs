@@ -1,5 +1,5 @@
 use crate::client::BybitClient;
-use crate::config;
+use crate::config::{self, Config};
 use crate::models::MarketPair;
 use anyhow::{Context, Result};
 use std::collections::HashMap;
@@ -13,6 +13,7 @@ pub struct TriangleDefinition {
 }
 
 pub struct PairManager {
+    pub config: Config,
     pub pairs: Vec<MarketPair>, // Made public for direct access by ArbitrageEngine
     price_map: HashMap<String, f64>,
     symbol_to_pair: HashMap<String, usize>,
@@ -21,8 +22,9 @@ pub struct PairManager {
 }
 
 impl PairManager {
-    pub fn new() -> Self {
+    pub fn new(config: Config) -> Self {
         Self {
+            config,
             pairs: Vec::new(),
             price_map: HashMap::new(),
             symbol_to_pair: HashMap::new(),
@@ -150,10 +152,10 @@ impl PairManager {
                     pair.ask_size = as_size;
                 }
 
-                pair.is_liquid = pair.volume_24h_usd >= crate::config::MIN_VOLUME_24H_USD
-                    && pair.spread_percent <= crate::config::MAX_SPREAD_PERCENT
-                    && pair.bid_size * pair.bid_price >= crate::config::MIN_BID_SIZE_USD
-                    && pair.ask_size * pair.ask_price >= crate::config::MIN_ASK_SIZE_USD;
+                pair.is_liquid = pair.volume_24h_usd >= self.config.min_volume_24h_usd
+                    && pair.spread_percent <= self.config.max_spread_percent
+                    && pair.bid_size * pair.bid_price >= self.config.min_bid_size_usd
+                    && pair.ask_size * pair.ask_price >= self.config.min_ask_size_usd;
             }
         }
     }
@@ -207,7 +209,7 @@ impl PairManager {
             }
 
             if let Some(ticker) = ticker_map.get(&instrument.symbol) {
-                if let Some(market_pair) = MarketPair::new(instrument, ticker) {
+                if let Some(market_pair) = MarketPair::new(instrument, ticker, &self.config) {
                     pairs.push(market_pair);
                 }
             }
@@ -453,12 +455,12 @@ impl PairManager {
         info!("🧪 Liquidity Filters:");
         info!(
             "  Min 24h volume: ${:.0}",
-            crate::config::MIN_VOLUME_24H_USD
+            self.config.min_volume_24h_usd
         );
-        info!("  Max spread: {:.1}%", crate::config::MAX_SPREAD_PERCENT);
+        info!("  Max spread: {:.1}%", self.config.max_spread_percent);
         info!(
             "  Min trade size: ${:.0}",
-            crate::config::MIN_TRADE_AMOUNT_USD
+            self.config.min_trade_amount_usd
         );
 
         // Log some popular currencies
@@ -516,11 +518,7 @@ impl PairManager {
     }
 }
 
-impl Default for PairManager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+
 
 // #[derive(Debug, Clone)]
 // pub struct TrianglePairs {

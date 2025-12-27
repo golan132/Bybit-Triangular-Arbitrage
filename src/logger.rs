@@ -38,7 +38,7 @@ pub fn init_logger() -> Result<(), anyhow::Error> {
 }
 
 /// Log configuration with runtime values
-pub fn log_startup_info(min_profit_threshold: f64, trading_fee_rate: f64) {
+pub fn log_startup_info(config: &crate::config::Config) {
     info!(
         "📈 Bybit Triangular Arbitrage Bot v{}",
         env!("CARGO_PKG_VERSION")
@@ -48,22 +48,22 @@ pub fn log_startup_info(min_profit_threshold: f64, trading_fee_rate: f64) {
 
     // Log some configuration info (without sensitive data)
     info!("📋 Configuration:");
-    info!("  • Min Profit Threshold: {:.2}%", min_profit_threshold);
+    info!("  • Min Profit Threshold: {:.2}%", config.min_profit_threshold);
     info!(
         "  • Trading Fee Rate: {:.2}% per trade",
-        trading_fee_rate * 100.0
+        config.trading_fee_rate * 100.0
     );
     info!(
         "  • Max Triangles to Scan: {}",
-        crate::config::MAX_TRIANGLES_TO_SCAN
+        config.max_triangles_to_scan
     );
     info!(
         "  • Balance Refresh: {}s",
-        crate::config::BALANCE_REFRESH_INTERVAL_SECS
+        config.balance_refresh_interval_secs
     );
     info!(
         "  • Price Refresh: {}s",
-        crate::config::PRICE_REFRESH_INTERVAL_SECS
+        config.price_refresh_interval_secs
     );
 }
 
