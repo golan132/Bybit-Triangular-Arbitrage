@@ -84,7 +84,10 @@ async fn main() -> Result<()> {
     let mut precision_manager = PrecisionManager::new();
 
     // Load cached precision data if available
-    if let Err(e) = precision_manager.load_cache_from_file("precision_cache.json").await {
+    if let Err(e) = precision_manager
+        .load_cache_from_file("precision_cache.json")
+        .await
+    {
         warn!("⚠️ Failed to load precision cache: {e}");
     }
 
@@ -205,13 +208,13 @@ async fn main() -> Result<()> {
                 break;
             }
             res = scan_arbitrage_cycle(
-                &client, 
-                &mut balance_manager, 
-                &mut pair_manager, 
-                &mut arbitrage_engine, 
-                cycle_count + 1, 
-                &mut initial_scan_logged, 
-                min_trade_amount, 
+                &client,
+                &mut balance_manager,
+                &mut pair_manager,
+                &mut arbitrage_engine,
+                cycle_count + 1,
+                &mut initial_scan_logged,
+                min_trade_amount,
                 &mut rx
             ) => {
                 cycle_count += 1;

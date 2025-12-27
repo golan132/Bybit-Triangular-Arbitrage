@@ -434,7 +434,9 @@ impl PrecisionManager {
     pub async fn save_cache_to_file(&self, file_path: &str) -> Result<()> {
         let json = serde_json::to_string_pretty(&self.working_decimals_cache)
             .context("Failed to serialize precision cache")?;
-        fs::write(file_path, json).await.context("Failed to write precision cache to file")?;
+        fs::write(file_path, json)
+            .await
+            .context("Failed to write precision cache to file")?;
         info!(
             "💾 Saved precision cache ({} symbols) to {}",
             self.working_decimals_cache.len(),
@@ -453,7 +455,9 @@ impl PrecisionManager {
             return Ok(());
         }
 
-        let json = fs::read_to_string(file_path).await.context("Failed to read precision cache file")?;
+        let json = fs::read_to_string(file_path)
+            .await
+            .context("Failed to read precision cache file")?;
         let cache: HashMap<String, u32> =
             serde_json::from_str(&json).context("Failed to deserialize precision cache")?;
 

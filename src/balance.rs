@@ -24,12 +24,15 @@ impl BalanceManager {
 
         // Try different account types to find balances in parallel
         let account_types = ["UNIFIED", "SPOT", "CONTRACT"];
-        
+
         // Create futures for all requests
         let futures = account_types.iter().map(|&account_type| {
             let client = client.clone();
             async move {
-                (account_type, client.get_wallet_balance(Some(account_type)).await)
+                (
+                    account_type,
+                    client.get_wallet_balance(Some(account_type)).await,
+                )
             }
         });
 
