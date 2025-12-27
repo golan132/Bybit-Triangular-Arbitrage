@@ -48,7 +48,10 @@ pub fn log_startup_info(config: &crate::config::Config) {
 
     // Log some configuration info (without sensitive data)
     info!("📋 Configuration:");
-    info!("  • Min Profit Threshold: {:.2}%", config.min_profit_threshold);
+    info!(
+        "  • Min Profit Threshold: {:.2}%",
+        config.min_profit_threshold
+    );
     info!(
         "  • Trading Fee Rate: {:.2}% per trade",
         config.trading_fee_rate * 100.0
@@ -61,10 +64,7 @@ pub fn log_startup_info(config: &crate::config::Config) {
         "  • Balance Refresh: {}s",
         config.balance_refresh_interval_secs
     );
-    info!(
-        "  • Price Refresh: {}s",
-        config.price_refresh_interval_secs
-    );
+    info!("  • Price Refresh: {}s", config.price_refresh_interval_secs);
 }
 
 /// Log arbitrage opportunity in a formatted way

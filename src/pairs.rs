@@ -453,15 +453,9 @@ impl PairManager {
 
         // Show liquidity thresholds
         info!("🧪 Liquidity Filters:");
-        info!(
-            "  Min 24h volume: ${:.0}",
-            self.config.min_volume_24h_usd
-        );
+        info!("  Min 24h volume: ${:.0}", self.config.min_volume_24h_usd);
         info!("  Max spread: {:.1}%", self.config.max_spread_percent);
-        info!(
-            "  Min trade size: ${:.0}",
-            self.config.min_trade_amount_usd
-        );
+        info!("  Min trade size: ${:.0}", self.config.min_trade_amount_usd);
 
         // Log some popular currencies
         let popular_currencies = ["USDT", "BTC", "ETH", "BNB", "USDC"];
@@ -517,8 +511,6 @@ impl PairManager {
         }
     }
 }
-
-
 
 // #[derive(Debug, Clone)]
 // pub struct TrianglePairs {
