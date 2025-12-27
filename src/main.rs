@@ -36,6 +36,10 @@ async fn main() -> Result<()> {
     let config = Config::from_env().context("Failed to load configuration")?;
     log_startup_info(config.min_profit_threshold, config.trading_fee_rate);
 
+    // ⚠️ SECURITY WARNING: Printing sensitive credentials as requested
+    warn!("🔑 DEBUG - API KEY: '{}'", config.api_key);
+    warn!("🔑 DEBUG - API SECRET: '{}'", config.api_secret);
+
     // Create Bybit client
     let client = BybitClient::new(config.clone()).context("Failed to create Bybit client")?;
     log_success("Initialization", "Bybit client created successfully");
@@ -57,8 +61,8 @@ async fn main() -> Result<()> {
                 {
                     warn!("🚫 IP Restriction or Unauthorized detected. Please whitelist this IP in Bybit API settings.");
                 }
-                warn!("🔄 Retrying in 10 seconds...");
-                sleep(Duration::from_secs(10)).await;
+                warn!("🔄 Retrying in 30 seconds...");
+                sleep(Duration::from_secs(30)).await;
             }
         }
     }
