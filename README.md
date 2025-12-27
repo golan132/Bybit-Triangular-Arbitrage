@@ -68,6 +68,27 @@ A high-performance Rust-based triangular arbitrage bot for Bybit cryptocurrency 
    # Edit .env with your API credentials
    ```
 
+## Infrastructure Setup (Oracle Cloud)
+
+To deploy the bot on Oracle Cloud Infrastructure (OCI) using the provided Terraform configuration, you need to generate an SSH key pair.
+
+1. **Generate SSH Keys**:
+   
+   Run the following command to create a dedicated SSH key pair for the bot instance:
+
+   ```bash
+   mkdir -p keys
+   ssh-keygen -t rsa -b 4096 -f keys/oci_bot_key -N ""
+   ```
+
+   This will create:
+   - `keys/oci_bot_key`: The private key (keep this safe!)
+   - `keys/oci_bot_key.pub`: The public key (used in Terraform configuration)
+
+2. **Configure Terraform**:
+   
+   Update your `infrastructure/environments/prod/prod.tfvars` or set the environment variable `TF_VAR_ssh_public_key` with the content of `keys/oci_bot_key.pub`.
+
 ## Configuration
 
 ### Environment Variables
