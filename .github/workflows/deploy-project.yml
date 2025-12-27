@@ -63,6 +63,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
 
+      - name: Debug Secrets
+        run: |
+          echo "Active Environment: ${{ inputs.environment || (github.ref == 'refs/heads/main' && 'Production' || 'Development') }}"
+          if [ -z "${{ secrets.OCI_TENANCY_OCID }}" ]; then
+            echo "::error::Secret OCI_TENANCY_OCID is missing! Ensure it is added to the correct Environment or Repository secrets."
+          else
+            echo "Secret OCI_TENANCY_OCID is found."
+          fi
+
       - name: Setup OCI Credentials
         uses: ./.github/actions/assume-oci-role
         with:
@@ -75,8 +84,13 @@ jobs:
       - name: Get Instance IP
         id: get-ip
         run: |
+          if [ -z "$TF_VAR_tenancy_ocid" ]; then
+            echo "Error: TF_VAR_tenancy_ocid is not set. Check your GitHub Secrets."
+            exit 1
+          fi
+
           # Find the instance by display name (must match what's in your Terraform)
-          INSTANCE_ID=$(oci compute instance list --compartment-id ${{ secrets.OCI_TENANCY_OCID }} --display-name "bybit-bot-instance" --query "data[0].id" --raw-output)
+          INSTANCE_ID=$(oci compute instance list --compartment-id $TF_VAR_tenancy_ocid --display-name "bybit-bot-instance" --query "data[0].id" --raw-output)
 
           if [ "$INSTANCE_ID" == "null" ] || [ -z "$INSTANCE_ID" ]; then
             echo "Instance not found!"
@@ -84,7 +98,7 @@ jobs:
           fi
 
           # Get the Public IP from the VNIC
-          VNIC_ID=$(oci compute vnic-attachment list --instance-id $INSTANCE_ID --compartment-id ${{ secrets.OCI_TENANCY_OCID }} --query "data[0].\"vnic-id\"" --raw-output)
+          VNIC_ID=$(oci compute vnic-attachment list --instance-id $INSTANCE_ID --compartment-id $TF_VAR_tenancy_ocid --query "data[0].\"vnic-id\"" --raw-output)
           PUBLIC_IP=$(oci network vnic get --vnic-id $VNIC_ID --query "data.\"public-ip\"" --raw-output)
 
           echo "Found Instance IP: $PUBLIC_IP"
