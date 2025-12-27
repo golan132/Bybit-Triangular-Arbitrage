@@ -51,7 +51,10 @@ async fn main() -> Result<()> {
             Err(e) => {
                 let error_msg = e.to_string();
                 warn!("⚠️ API Connection Failed: {error_msg}");
-                if error_msg.contains("10010") || error_msg.contains("IP") || error_msg.contains("401") {
+                if error_msg.contains("10010")
+                    || error_msg.contains("IP")
+                    || error_msg.contains("401")
+                {
                     warn!("🚫 IP Restriction or Unauthorized detected. Please whitelist this IP in Bybit API settings.");
                 }
                 warn!("🔄 Retrying in 10 seconds...");
