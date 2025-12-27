@@ -267,7 +267,11 @@ impl ArbitrageTrader {
                     // Try to rollback previous trades if possible
                     if !executions.is_empty() {
                         warn!("🔄 Attempting to rollback previous trades...");
-                        // TODO: Implement rollback logic
+                        if let Err(rollback_err) = self.rollback_trades(&executions, opportunity).await {
+                            error!("❌ Rollback failed: {}", rollback_err);
+                        } else {
+                            warn!("✅ Rollback completed successfully");
+                        }
                     }
 
                     return Ok(ArbitrageExecutionResult {
@@ -311,6 +315,76 @@ impl ArbitrageTrader {
             execution_time_ms: execution_time,
             error_message: None,
         })
+    }
+
+    /// Attempt to rollback trades to return to the initial currency
+    async fn rollback_trades(
+        &mut self,
+        executions: &[TradeExecution],
+        opportunity: &ArbitrageOpportunity,
+    ) -> Result<()> {
+        // We need to reverse the executed steps
+        // If we executed step 1 (A->B), we need to do B->A
+        // If we executed step 1 & 2 (A->B, B->C), we need to do C->B, then B->A
+
+        let mut current_step = executions.len();
+        
+        while current_step > 0 {
+            let step_index = current_step - 1;
+            
+            // The currency we currently hold
+            let current_currency = &opportunity.path[current_step];
+            // The currency we want to go back to
+            let target_currency = &opportunity.path[current_step - 1];
+            
+            // The pair we used
+            let pair_symbol = &opportunity.pairs[step_index];
+            
+            info!("🔄 Rollback Step {}: Converting {} back to {} via {}", 
+                  current_step, current_currency, target_currency, pair_symbol);
+
+            // Get the balance of the currency we hold
+            let balance = self.get_actual_balance(current_currency).await?;
+            
+            // Use 99% of balance to ensure we can cover fees and avoid precision issues
+            let trade_amount = balance * 0.99;
+
+            if trade_amount <= 0.0 {
+                warn!("⚠️ No balance of {} found for rollback, skipping step", current_currency);
+                current_step -= 1;
+                continue;
+            }
+
+            // Determine action to go from current -> target
+            // Note: determine_trade_action takes (symbol, from, to, amount)
+            let (action, quantity) = self.determine_trade_action(
+                pair_symbol, 
+                current_currency, 
+                target_currency, 
+                trade_amount
+            ).await?;
+
+            info!("🔄 Rollback Action: {} {} of {}", action, quantity, pair_symbol);
+
+            // Execute the trade
+            // We use a special step number 99 to indicate rollback in logs if needed
+            let order_result = self.place_order_with_precision_retry(
+                pair_symbol, 
+                &action, 
+                quantity, 
+                99 
+            ).await?;
+
+            // Wait for execution
+            match self.wait_for_order_execution(&order_result.order_id, pair_symbol).await {
+                Ok(_) => info!("✅ Rollback Step {} complete", current_step),
+                Err(e) => error!("❌ Rollback Step {} failed: {}", current_step, e),
+            }
+            
+            current_step -= 1;
+        }
+
+        Ok(())
     }
 
     /// Wait for balance to be settled after previous trade

@@ -1,32 +1,33 @@
-# Build stage
-FROM rust:1-slim-bookworm AS builder
-
-WORKDIR /usr/src/app
-
+# Base stage for cargo-chef
+FROM rust:1-slim-bookworm AS chef
 # Install dependencies required for building (e.g., pkg-config, libssl-dev)
 RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+RUN cargo install cargo-chef
+WORKDIR /app
 
-# 1. Cache dependencies
-COPY Cargo.toml Cargo.lock ./
-# Create a dummy src/main.rs to satisfy cargo
-RUN mkdir src && echo "fn main() {}" > src/main.rs
-RUN cargo build --release
+# Planner stage
+FROM chef AS planner
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
 
-# 2. Build actual application
-# Remove the dummy build artifacts so the actual code is recompiled
-RUN rm -f target/release/deps/bybit_arbitrage_bot*
-COPY src ./src
+# Builder stage
+FROM chef AS builder
+COPY --from=planner /app/recipe.json recipe.json
+# Build dependencies - this is the cached layer
+RUN cargo chef cook --release --recipe-path recipe.json
+# Build application
+COPY . .
 RUN cargo build --release
 
 # Runtime stage
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim AS runtime
 
 WORKDIR /usr/local/bin
 
 # Install runtime dependencies (OpenSSL, CA Certificates)
 RUN apt-get update && apt-get install -y libssl-dev ca-certificates && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /usr/src/app/target/release/bybit-arbitrage-bot .
+COPY --from=builder /app/target/release/bybit-arbitrage-bot .
 COPY precision_cache.json .
 
 CMD ["./bybit-arbitrage-bot"]

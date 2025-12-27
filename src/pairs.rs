@@ -5,11 +5,19 @@ use anyhow::{Context, Result};
 use std::collections::HashMap;
 use tracing::{debug, info};
 
+#[derive(Debug, Clone)]
+pub struct TriangleDefinition {
+    pub base_currency: String,
+    pub indices: [usize; 3],
+    pub path: Vec<String>,
+}
+
 pub struct PairManager {
-    pairs: Vec<MarketPair>,
+    pub pairs: Vec<MarketPair>, // Made public for direct access by ArbitrageEngine
     price_map: HashMap<String, f64>,
     symbol_to_pair: HashMap<String, usize>,
     last_updated: Option<chrono::DateTime<chrono::Utc>>,
+    triangle_cache: HashMap<String, Vec<TriangleDefinition>>,
 }
 
 impl PairManager {
@@ -19,6 +27,7 @@ impl PairManager {
             price_map: HashMap::new(),
             symbol_to_pair: HashMap::new(),
             last_updated: None,
+            triangle_cache: HashMap::new(),
         }
     }
 
@@ -188,7 +197,7 @@ impl PairManager {
         let mut symbol_to_pair = HashMap::new();
         let mut blacklisted_count = 0;
 
-        for (idx, instrument) in instruments.iter().enumerate() {
+        for instrument in instruments.iter() {
             // Check if base or quote currency is blacklisted
             if config::is_token_blacklisted(&instrument.base_coin)
                 || config::is_token_blacklisted(&instrument.quote_coin)
@@ -199,7 +208,6 @@ impl PairManager {
 
             if let Some(ticker) = ticker_map.get(&instrument.symbol) {
                 if let Some(market_pair) = MarketPair::new(instrument, ticker) {
-                    symbol_to_pair.insert(market_pair.symbol.clone(), idx);
                     pairs.push(market_pair);
                 }
             }
@@ -232,6 +240,9 @@ impl PairManager {
         self.symbol_to_pair = symbol_to_pair;
         self.last_updated = Some(chrono::Utc::now());
 
+        // Rebuild triangle cache after updating pairs
+        self.rebuild_triangle_cache();
+
         info!(
             "✅ Updated {} trading pairs with current prices",
             self.pairs.len()
@@ -240,6 +251,108 @@ impl PairManager {
         self.log_bid_ask_analysis();
 
         Ok(())
+    }
+
+    /// Rebuild the cache of triangle definitions
+    /// This is an expensive operation but only needs to run when pairs change
+    fn rebuild_triangle_cache(&mut self) {
+        info!("🔄 Rebuilding triangle cache...");
+        self.triangle_cache.clear();
+
+        let currencies = self.get_all_currencies();
+        let mut total_triangles = 0;
+
+        // Pre-calculate liquid pairs indices to speed up the search
+        let liquid_indices: Vec<usize> = self
+            .pairs
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.is_liquid)
+            .map(|(i, _)| i)
+            .collect();
+
+        for base_currency in currencies {
+            let mut triangles = Vec::new();
+
+            // Find pairs starting with base_currency
+            // We iterate over indices to store them
+            for &idx1 in &liquid_indices {
+                let pair1 = &self.pairs[idx1];
+                if pair1.base != base_currency && pair1.quote != base_currency {
+                    continue;
+                }
+
+                let intermediate = if pair1.base == base_currency {
+                    &pair1.quote
+                } else {
+                    &pair1.base
+                };
+
+                if intermediate == &base_currency {
+                    continue;
+                }
+
+                for &idx2 in &liquid_indices {
+                    if idx1 == idx2 {
+                        continue;
+                    }
+                    let pair2 = &self.pairs[idx2];
+
+                    if pair2.base != *intermediate && pair2.quote != *intermediate {
+                        continue;
+                    }
+
+                    let final_currency = if pair2.base == *intermediate {
+                        &pair2.quote
+                    } else {
+                        &pair2.base
+                    };
+
+                    if final_currency == &base_currency || final_currency == intermediate {
+                        continue;
+                    }
+
+                    for &idx3 in &liquid_indices {
+                        if idx3 == idx1 || idx3 == idx2 {
+                            continue;
+                        }
+                        let pair3 = &self.pairs[idx3];
+
+                        let closes_loop = (pair3.base == *final_currency
+                            && pair3.quote == base_currency)
+                            || (pair3.quote == *final_currency && pair3.base == base_currency);
+
+                        if closes_loop {
+                            triangles.push(TriangleDefinition {
+                                base_currency: base_currency.clone(),
+                                indices: [idx1, idx2, idx3],
+                                path: vec![
+                                    base_currency.clone(),
+                                    intermediate.clone(),
+                                    final_currency.clone(),
+                                    base_currency.clone(),
+                                ],
+                            });
+                        }
+                    }
+                }
+            }
+
+            if !triangles.is_empty() {
+                total_triangles += triangles.len();
+                self.triangle_cache.insert(base_currency, triangles);
+            }
+        }
+
+        info!(
+            "✅ Triangle cache rebuilt: {} triangles cached",
+            total_triangles
+        );
+    }
+
+    /// Get cached triangle definitions for a base currency
+    pub fn get_cached_triangles(&self, base_currency: &str) -> Option<&Vec<TriangleDefinition>> {
+        self.triangle_cache.get(base_currency)
     }
 
     /// Get all market pairs
@@ -269,112 +382,7 @@ impl PairManager {
         result
     }
 
-    /// Find a specific pair by symbol
-    pub fn get_pair_by_symbol(&self, symbol: &str) -> Option<&MarketPair> {
-        self.symbol_to_pair
-            .get(symbol)
-            .and_then(|&idx| self.pairs.get(idx))
-    }
-
-    /// Find pairs that could form triangular arbitrage with given base currency
-    pub fn find_triangle_pairs(&self, base_currency: &str) -> Vec<TrianglePairs> {
-        let mut triangles = Vec::new();
-
-        // Only consider liquid pairs for arbitrage
-        let liquid_pairs: Vec<&MarketPair> = self
-            .pairs
-            .iter()
-            .filter(|pair| pair.is_liquid && pair.is_active)
-            .collect();
-
-        let pairs_with_base: Vec<&MarketPair> = liquid_pairs
-            .iter()
-            .filter(|pair| pair.base == base_currency || pair.quote == base_currency)
-            .cloned()
-            .collect();
-
-        debug!(
-            "🔍 Looking for triangles with {} liquid pairs containing {}",
-            pairs_with_base.len(),
-            base_currency
-        );
-
-        for pair1 in &pairs_with_base {
-            // pair1: base -> intermediate
-            let intermediate = if pair1.base == base_currency {
-                &pair1.quote
-            } else {
-                &pair1.base
-            };
-
-            if intermediate == base_currency {
-                continue; // Skip self-referencing pairs
-            }
-
-            let pairs_with_intermediate: Vec<&MarketPair> = liquid_pairs
-                .iter()
-                .filter(|pair| pair.base == *intermediate || pair.quote == *intermediate)
-                .cloned()
-                .collect();
-
-            for pair2 in &pairs_with_intermediate {
-                if pair2.symbol == pair1.symbol {
-                    continue; // Skip same pair
-                }
-
-                // pair2: intermediate -> final
-                let final_currency = if pair2.base == *intermediate {
-                    &pair2.quote
-                } else {
-                    &pair2.base
-                };
-
-                if final_currency == base_currency || final_currency == intermediate {
-                    continue; // Skip circular or same currency
-                }
-
-                // pair3: final -> base (closing the triangle)
-                let pairs_with_final: Vec<&MarketPair> = liquid_pairs
-                    .iter()
-                    .filter(|pair| pair.base == *final_currency || pair.quote == *final_currency)
-                    .cloned()
-                    .collect();
-
-                for pair3 in &pairs_with_final {
-                    if pair3.symbol == pair1.symbol || pair3.symbol == pair2.symbol {
-                        continue; // Skip duplicate pairs
-                    }
-
-                    let closes_loop = (pair3.base == *final_currency
-                        && pair3.quote == *base_currency)
-                        || (pair3.quote == *final_currency && pair3.base == *base_currency);
-
-                    if closes_loop {
-                        triangles.push(TrianglePairs {
-                            base_currency: base_currency.to_string(),
-                            pair1: (*pair1).clone(),
-                            pair2: (*pair2).clone(),
-                            pair3: (*pair3).clone(),
-                            path: vec![
-                                base_currency.to_string(),
-                                intermediate.to_string(),
-                                final_currency.to_string(),
-                                base_currency.to_string(),
-                            ],
-                        });
-                    }
-                }
-            }
-        }
-
-        debug!(
-            "Found {} potential triangles for base currency {}",
-            triangles.len(),
-            base_currency
-        );
-
-        triangles
-    }
+    // find_triangle_pairs removed - replaced by cached triangles logic
 
     /// Get trading statistics
     pub fn get_statistics(&self) -> PairStatistics {
@@ -514,14 +522,14 @@ impl Default for PairManager {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct TrianglePairs {
-    pub base_currency: String,
-    pub pair1: MarketPair,
-    pub pair2: MarketPair,
-    pub pair3: MarketPair,
-    pub path: Vec<String>,
-}
+// #[derive(Debug, Clone)]
+// pub struct TrianglePairs {
+//     pub base_currency: String,
+//     pub pair1: MarketPair,
+//     pub pair2: MarketPair,
+//     pub pair3: MarketPair,
+//     pub path: Vec<String>,
+// }
 
 #[derive(Debug, Clone, Default)]
 pub struct PairStatistics {
@@ -627,7 +635,10 @@ mod tests {
             manager.symbol_to_pair.insert(pair.symbol.clone(), idx);
         }
 
-        let triangles = manager.find_triangle_pairs("USDT");
+        // Rebuild cache
+        manager.rebuild_triangle_cache();
+
+        let triangles = manager.get_cached_triangles("USDT").unwrap();
         assert!(!triangles.is_empty());
 
         // Should find USDT -> BTC -> ETH -> USDT or USDT -> ETH -> BTC -> USDT

@@ -2,8 +2,8 @@ use crate::client::BybitClient;
 use crate::models::InstrumentsInfoResult;
 use anyhow::{Context, Result};
 use std::collections::HashMap;
-use std::fs;
 use std::path::Path;
+use tokio::fs;
 use tracing::{debug, info};
 
 #[derive(Debug, Clone)]
@@ -47,7 +47,7 @@ impl PrecisionManager {
         self.process_instruments_info(instruments)?;
 
         // Load existing cache if available
-        if let Err(e) = self.load_cache_from_file("precision_cache.json") {
+        if let Err(e) = self.load_cache_from_file("precision_cache.json").await {
             debug!("No existing precision cache found or failed to load: {}", e);
         }
 
@@ -66,7 +66,7 @@ impl PrecisionManager {
         if new_entries > 0 {
             info!("♻️  Added {} new symbols to precision cache", new_entries);
             // Save the updated cache immediately to ensure file is up to date
-            self.save_cache_to_file("precision_cache.json")?;
+            self.save_cache_to_file("precision_cache.json").await?;
         } else {
             info!(
                 "✅ Precision cache is up to date ({} symbols)",
@@ -431,10 +431,10 @@ impl PrecisionManager {
     }
 
     /// Save precision cache to file
-    pub fn save_cache_to_file(&self, file_path: &str) -> Result<()> {
+    pub async fn save_cache_to_file(&self, file_path: &str) -> Result<()> {
         let json = serde_json::to_string_pretty(&self.working_decimals_cache)
             .context("Failed to serialize precision cache")?;
-        fs::write(file_path, json).context("Failed to write precision cache to file")?;
+        fs::write(file_path, json).await.context("Failed to write precision cache to file")?;
         info!(
             "💾 Saved precision cache ({} symbols) to {}",
             self.working_decimals_cache.len(),
@@ -444,7 +444,7 @@ impl PrecisionManager {
     }
 
     /// Load precision cache from file
-    pub fn load_cache_from_file(&mut self, file_path: &str) -> Result<()> {
+    pub async fn load_cache_from_file(&mut self, file_path: &str) -> Result<()> {
         if !Path::new(file_path).exists() {
             info!(
                 "📁 No precision cache file found at {}, starting with empty cache",
@@ -453,7 +453,7 @@ impl PrecisionManager {
             return Ok(());
         }
 
-        let json = fs::read_to_string(file_path).context("Failed to read precision cache file")?;
+        let json = fs::read_to_string(file_path).await.context("Failed to read precision cache file")?;
         let cache: HashMap<String, u32> =
             serde_json::from_str(&json).context("Failed to deserialize precision cache")?;
 
@@ -467,7 +467,7 @@ impl PrecisionManager {
     }
 
     /// Auto-save cache periodically or on program exit
-    pub fn auto_save_cache(&self) -> Result<()> {
-        self.save_cache_to_file("precision_cache.json")
+    pub async fn auto_save_cache(&self) -> Result<()> {
+        self.save_cache_to_file("precision_cache.json").await
     }
 }

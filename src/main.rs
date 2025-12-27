@@ -24,6 +24,9 @@ use precision::PrecisionManager;
 use trader::ArbitrageTrader;
 use websocket::BybitWebsocket;
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // Load .env file first so RUST_LOG is available for logger initialization
@@ -81,7 +84,7 @@ async fn main() -> Result<()> {
     let mut precision_manager = PrecisionManager::new();
 
     // Load cached precision data if available
-    if let Err(e) = precision_manager.load_cache_from_file("precision_cache.json") {
+    if let Err(e) = precision_manager.load_cache_from_file("precision_cache.json").await {
         warn!("⚠️ Failed to load precision cache: {e}");
     }
 
@@ -187,7 +190,8 @@ async fn main() -> Result<()> {
 
     // Main application loop - will exit after reaching max trades
     loop {
-        tokio::select! {
+        // 1. Scan for opportunities (cancellable)
+        let opportunity = tokio::select! {
             _ = tokio::signal::ctrl_c() => {
                 println!(); // Newline
                 info!("🛑 Received Ctrl+C signal. Shutting down...");
@@ -200,33 +204,114 @@ async fn main() -> Result<()> {
 
                 break;
             }
-            res = run_arbitrage_cycle(&client, &mut balance_manager, &mut pair_manager, &mut arbitrage_engine, &mut trader, &precision_manager, cycle_count + 1, &mut initial_scan_logged, &mut trades_completed, max_trades, min_trade_amount, &mut rx) => {
+            res = scan_arbitrage_cycle(
+                &client, 
+                &mut balance_manager, 
+                &mut pair_manager, 
+                &mut arbitrage_engine, 
+                cycle_count + 1, 
+                &mut initial_scan_logged, 
+                min_trade_amount, 
+                &mut rx
+            ) => {
                 cycle_count += 1;
                 match res {
-                    Ok(should_exit) => {
-                        if should_exit {
-                            warn!("🎯 TRADE LIMIT REACHED ({trades_completed}/{max_trades}) - Bot stopping as requested");
-                            break;
-                        }
+                    Ok(opp) => {
                         // Only log every 100 cycles to reduce spam
                         if cycle_count % 100 == 0 {
                             log_success("Status", &format!("Completed {cycle_count} cycles successfully (Trades: {trades_completed}/{max_trades})"));
                         }
-                    }
+                        opp
+                    },
                     Err(e) => {
                         log_error_with_context("Arbitrage Cycle", &*e);
                         log_warning("Recovery", "Continuing to next cycle after error");
+                        None
                     }
                 }
-                // Run continuously without delay for live arbitrage scanning
-                // Add a small delay to prevent overwhelming the API
-                // sleep(Duration::from_millis(500)).await;
+            }
+        };
+
+        // 2. Execute trade if found (NOT cancellable)
+        if let Some(best_opportunity) = opportunity {
+            warn!(
+                "💰 EXECUTING TRADE #{}: Found profitable opportunity {:.2}% - executing!",
+                trades_completed + 1,
+                best_opportunity.estimated_profit_pct
+            );
+
+            match trader
+                .execute_arbitrage(&best_opportunity, min_trade_amount)
+                .await
+            {
+                Ok(result) => {
+                    if result.success {
+                        trades_completed += 1; // Only increment on successful trades
+                        warn!("✅ TRADE #{} SUCCESS!", trades_completed);
+                        warn!(
+                            "   Realized Profit: ${:.6} ({:.2}%)",
+                            result.actual_profit, result.actual_profit_pct
+                        );
+                        if result.dust_value_usd > 0.0 {
+                            warn!("   Dust Value: ${:.6}", result.dust_value_usd);
+                            let total_profit = result.actual_profit + result.dust_value_usd;
+                            let total_pct = (total_profit / result.initial_amount) * 100.0;
+                            warn!(
+                                "   Total Profit (inc. Dust): ${:.6} ({:.2}%)",
+                                total_profit, total_pct
+                            );
+                        }
+                        warn!("   Execution time: {}ms", result.execution_time_ms);
+                        warn!("   Total fees: ${:.6}", result.total_fees);
+
+                        // Force balance refresh after successful trade
+                        balance_manager.force_refresh();
+
+                        // Save precision cache after successful trade
+                        if let Err(e) = trader.get_precision_manager().auto_save_cache().await {
+                            warn!("⚠️ Failed to save precision cache: {e}");
+                        }
+
+                        if trades_completed >= max_trades {
+                            warn!(
+                                "🏁 All {max_trades} trade(s) completed successfully - stopping bot"
+                            );
+                            break; // Exit the main loop
+                        } else {
+                            warn!("⏳ Trade {trades_completed}/{max_trades} completed, continuing to look for next opportunity...");
+                        }
+                    } else {
+                        let error_msg = result
+                            .error_message
+                            .unwrap_or_else(|| "Unknown error".to_string());
+                        warn!("❌ TRADE FAILED: {error_msg}");
+
+                        // Check if it's a recoverable error (API restrictions, etc.)
+                        if error_msg.contains("170348")
+                            || error_msg.contains("geographical")
+                            || error_msg.contains("restricted")
+                        {
+                            warn!("🚫 Trade failed due to geographical/API restrictions - continuing to scan for other opportunities");
+                        } else {
+                            warn!("⚠️ Trade failed with different error - continuing to scan");
+                        }
+
+                        // Don't increment trade counter for failed trades - keep looking for opportunities
+                        info!("🔄 Continuing to scan for other profitable opportunities...");
+                    }
+                }
+                Err(e) => {
+                    let error_str = e.to_string();
+                    warn!("❌ Trade execution error: {error_str}");
+                    warn!("⚠️ Trade failed with different error - continuing to scan");
+                    info!("🔄 Continuing to scan for other profitable opportunities...");
+                }
             }
         }
     }
 
     // Save precision cache on exit
-    if let Err(e) = trader.get_precision_manager().auto_save_cache() {
+    if let Err(e) = trader.get_precision_manager().auto_save_cache().await {
         warn!("⚠️ Failed to save precision cache on exit: {e}");
     }
 
@@ -234,20 +319,16 @@ async fn main() -> Result<()> {
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn run_arbitrage_cycle(
+async fn scan_arbitrage_cycle(
     client: &BybitClient,
     balance_manager: &mut BalanceManager,
     pair_manager: &mut PairManager,
     arbitrage_engine: &mut ArbitrageEngine,
-    trader: &mut ArbitrageTrader,
-    _precision_manager: &PrecisionManager,
     cycle_count: u64,
     initial_scan_logged: &mut bool,
-    trades_completed: &mut u32,
-    max_trades: u32,
     min_trade_amount: f64,
     rx: &mut tokio::sync::mpsc::Receiver<crate::models::TickerInfo>,
-) -> Result<bool> {
+) -> Result<Option<crate::models::ArbitrageOpportunity>> {
     let cycle_start = Instant::now();
 
     // Only log cycle start every 50 cycles to reduce spam
@@ -256,8 +337,9 @@ async fn run_arbitrage_cycle(
     }
 
     // Phase 1: Update account balances
+    let mut balance_updated = false;
     if balance_manager.needs_refresh(config::BALANCE_REFRESH_INTERVAL_SECS) {
-        if cycle_count.is_multiple_of(10) {
+        if cycle_count.is_multiple_of(100) {
             log_phase("balance", "Refreshing account balances");
         }
         let balance_start = Instant::now();
@@ -267,13 +349,15 @@ async fn run_arbitrage_cycle(
             .await
             .context("Failed to update balances")?;
 
+        balance_updated = true;
+
         // Log initial scanning info only once after first balance update
         if !*initial_scan_logged {
             balance_manager.log_initial_scanning_info_with_min_amount(min_trade_amount);
             *initial_scan_logged = true;
         }
 
-        if cycle_count.is_multiple_of(10) {
+        if cycle_count.is_multiple_of(100) {
             log_performance_metrics(
                 "Balance fetch",
                 balance_start.elapsed().as_millis() as u64,
@@ -289,6 +373,7 @@ async fn run_arbitrage_cycle(
     let needs_full_refresh =
         pair_manager.get_pairs().is_empty() || cycle_count.is_multiple_of(2000);
 
+    let mut prices_updated = false;
     if needs_full_refresh {
         log_phase(
             "pairs",
@@ -300,6 +385,8 @@ async fn run_arbitrage_cycle(
             .update_pairs_and_prices(client)
             .await
             .context("Failed to update pairs and prices")?;
+
+        prices_updated = true;
 
         log_performance_metrics(
             "Full pairs refresh",
@@ -318,15 +405,23 @@ async fn run_arbitrage_cycle(
         }
 
         if updates_count > 0 {
-            if cycle_count.is_multiple_of(10) {
+            prices_updated = true;
+            if cycle_count.is_multiple_of(100) {
                 info!("⚡ Processed {updates_count} WebSocket ticker updates");
             }
-        } else if cycle_count.is_multiple_of(10) {
-            warn!("⚠️ No WebSocket updates received in this cycle (Check connection/subscription)");
+        } else if cycle_count.is_multiple_of(100) {
+            // Only warn if we haven't received updates for a while
+            // warn!("⚠️ No WebSocket updates received in this cycle (Check connection/subscription)");
         }
     }
 
     // Phase 3: Scan for arbitrage opportunities
+    // Optimization: Only scan if prices or balances have changed
+    if !prices_updated && !balance_updated {
+        // No changes, skip scanning to save CPU
+        return Ok(None);
+    }
+
     let arbitrage_start = Instant::now();
 
     let opportunities = arbitrage_engine.scan_opportunities_with_min_amount(
@@ -335,121 +430,27 @@ async fn run_arbitrage_cycle(
         min_trade_amount,
     );
 
-    // Execute profitable opportunities (only the most profitable one per cycle)
+    // Return profitable opportunities (only the most profitable one per cycle)
     if let Some(best_opportunity) = opportunities.first() {
-        // Only log periodically to avoid spam, even for profitable ones (since we log execution separately)
+        // Only log periodically to avoid spam
         if cycle_count.is_multiple_of(10) {
             log_arbitrage_opportunity(best_opportunity, 1);
         }
 
-        // Execute the trade if profit is above threshold and we have sufficient balance
-        // AND we haven't reached the maximum number of trades yet
-        if *trades_completed < max_trades && best_opportunity.estimated_profit_pct > 0.01 {
+        // Check if profit is above threshold and we have sufficient balance
+        if best_opportunity.estimated_profit_pct > 0.01 {
             // More than 0.01% profit
             let usdt_balance = balance_manager.get_balance("USDT");
             if usdt_balance >= min_trade_amount {
-                warn!(
-                    "💰 EXECUTING TRADE #{}: Found profitable opportunity {:.2}% - executing!",
-                    *trades_completed + 1,
-                    best_opportunity.estimated_profit_pct
-                );
-
-                match trader
-                    .execute_arbitrage(best_opportunity, min_trade_amount)
-                    .await
-                {
-                    Ok(result) => {
-                        if result.success {
-                            *trades_completed += 1; // Only increment on successful trades
-                            warn!("✅ TRADE #{} SUCCESS!", *trades_completed);
-                            warn!("✅ TRADE #{trades_completed} SUCCESS!");
-                            warn!(
-                                "   Realized Profit: ${:.6} ({:.2}%)",
-                                result.actual_profit, result.actual_profit_pct
-                            );
-                            if result.dust_value_usd > 0.0 {
-                                warn!("   Dust Value: ${:.6}", result.dust_value_usd);
-                                let total_profit = result.actual_profit + result.dust_value_usd;
-                                let total_pct = (total_profit / result.initial_amount) * 100.0;
-                                warn!(
-                                    "   Total Profit (inc. Dust): ${:.6} ({:.2}%)",
-                                    total_profit, total_pct
-                                );
-                            }
-                            warn!("   Execution time: {}ms", result.execution_time_ms);
-                            warn!("   Total fees: ${:.6}", result.total_fees);
-
-                            // Force balance refresh after successful trade
-                            balance_manager.force_refresh();
-
-                            // Save precision cache after successful trade
-                            if let Err(e) = trader.get_precision_manager().auto_save_cache() {
-                                warn!("⚠️ Failed to save precision cache: {e}");
-                            }
-
-                            if *trades_completed >= max_trades {
-                                warn!(
-                                    "🏁 All {max_trades} trade(s) completed successfully - stopping bot"
-                                );
-                                return Ok(true); // Signal to exit the main loop
-                            } else {
-                                warn!("⏳ Trade {trades_completed}/{max_trades} completed, continuing to look for next opportunity...");
-                            }
-                        } else {
-                            let error_msg = result
-                                .error_message
-                                .unwrap_or_else(|| "Unknown error".to_string());
-                            warn!("❌ TRADE FAILED: {error_msg}");
-
-                            // Check if it's a recoverable error (API restrictions, etc.)
-                            if error_msg.contains("170348")
-                                || error_msg.contains("geographical")
-                                || error_msg.contains("restricted")
-                            {
-                                warn!("🚫 Trade failed due to geographical/API restrictions - continuing to scan for other opportunities");
-                            } else {
-                                warn!("⚠️ Trade failed with different error - continuing to scan");
-                            }
-
-                            // Don't increment trade counter for failed trades - keep looking for opportunities
-                            info!("🔄 Continuing to scan for other profitable opportunities...");
-                        }
-                    }
-                    Err(e) => {
-                        let error_str = e.to_string();
-                        warn!("❌ Trade execution error: {error_str}");
-
-                        // Check if it's a recoverable error
-                        if error_str.contains("170348")
-                            || error_str.contains("geographical")
-                            || error_str.contains("restricted")
-                        {
-                            warn!("🚫 Trade failed due to geographical/API restrictions - continuing to scan for other opportunities");
-                        } else {
-                            warn!("⚠️ Trade failed with different error - continuing to scan");
-                        }
-
-                        // Don't increment trade counter for errors - keep looking for opportunities
-                        info!("🔄 Continuing to scan for other profitable opportunities...");
-                    }
-                }
+                return Ok(Some(best_opportunity.clone()));
             } else if cycle_count.is_multiple_of(100) {
-                info!("💸 Insufficient USDT balance for trade: ${usdt_balance:.2} (need ${min_trade_amount:.2}) - Trades: {trades_completed}/{max_trades}");
-            }
-        } else if *trades_completed >= max_trades {
-            // All trades completed, just continue scanning until we exit
-            if cycle_count.is_multiple_of(100) {
-                info!("⏳ All {max_trades} trades completed - scanning for exit condition...");
+                warn!(
+                    "⚠️ Found opportunity {:.2}% but insufficient USDT balance: ${:.2} < ${:.2}",
+                    best_opportunity.estimated_profit_pct, usdt_balance, min_trade_amount
+                );
             }
         }
     }
-
-    // Show top 5 opportunities for monitoring - REMOVED to reduce spam
-    // for (i, opportunity) in opportunities.iter().take(5).enumerate() {
-    //     if i > 0 { // We already logged the first one above
-    //         log_arbitrage_opportunity(opportunity, i + 1);
-    //     }
-    // }
 
     // Only log cycle summary every 300 cycles
     if cycle_count.is_multiple_of(crate::config::CYCLE_SUMMARY_INTERVAL as u64) {
@@ -468,7 +469,7 @@ async fn run_arbitrage_cycle(
         info!("  • Cycle time: {:.2}ms", cycle_duration.as_millis());
     }
 
-    Ok(false) // Continue running unless trade was executed
+    Ok(None)
 }
 
 async fn check_api_latency() {
