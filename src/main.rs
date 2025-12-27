@@ -31,14 +31,14 @@ async fn main() -> Result<()> {
 
     // Initialize logging
     init_logger().context("Failed to initialize logger")?;
+
+    // Check latency to Bybit API
+    check_api_latency().await;
+
     // Load configuration
     log_phase("init", "Loading configuration");
     let config = Config::from_env().context("Failed to load configuration")?;
     log_startup_info(config.min_profit_threshold, config.trading_fee_rate);
-
-    // ⚠️ SECURITY WARNING: Printing sensitive credentials as requested
-    warn!("🔑 DEBUG - API KEY: '{}'", config.api_key);
-    warn!("🔑 DEBUG - API SECRET: '{}'", config.api_secret);
 
     // Create Bybit client
     let client = BybitClient::new(config.clone()).context("Failed to create Bybit client")?;
@@ -468,6 +468,38 @@ async fn run_arbitrage_cycle(
     }
 
     Ok(false) // Continue running unless trade was executed
+}
+
+async fn check_api_latency() {
+    info!("⚡ Checking latency to Bybit API (api.bybit.com)...");
+    let start = Instant::now();
+    match reqwest::get("https://api.bybit.com/v5/market/time").await {
+        Ok(resp) => {
+            let duration = start.elapsed();
+            let status = resp.status();
+            if status.is_success() {
+                info!(
+                    "✅ API Latency: {:.2}ms (Status: {})",
+                    duration.as_secs_f64() * 1000.0,
+                    status
+                );
+                if duration.as_millis() < 50 {
+                    info!("🚀 Excellent connection! Server is likely close to Bybit edge node.");
+                } else if duration.as_millis() < 200 {
+                    info!("👌 Good connection.");
+                } else {
+                    warn!("⚠️ High latency detected (>200ms). This might affect arbitrage performance.");
+                }
+            } else {
+                warn!(
+                    "⚠️ API reachable but returned error status: {} (Latency: {:.2}ms)",
+                    status,
+                    duration.as_secs_f64() * 1000.0
+                );
+            }
+        }
+        Err(e) => warn!("❌ Failed to ping Bybit API: {}", e),
+    }
 }
 
 /// Create a sample .env file for configuration
