@@ -13,9 +13,9 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: 'Environment to deploy to'
+        description: "Environment to deploy to"
         required: true
-        default: 'Development'
+        default: "Development"
         type: choice
         options:
           - Development
@@ -137,7 +137,7 @@ jobs:
               -e DRY_RUN=${{ vars.DRY_RUN || 'true' }} \
               -e MAX_TRADES=${{ vars.MAX_TRADES || '100' }} \
               -e ORDER_SIZE=${{ vars.ORDER_SIZE || '10' }} \
-              -e MIN_PROFIT_THRESHOLD=${{ vars.MIN_PROFIT_THRESHOLD || '0.3' }} \
+              -e MIN_PROFIT_THRESHOLD=${{ vars.MIN_PROFIT_THRESHOLD || '0.05' }} \
               -e TRADING_FEE_RATE=${{ vars.TRADING_FEE_RATE || '0.00075' }} \
               -e MAX_TRIANGLES_TO_SCAN=${{ vars.MAX_TRIANGLES_TO_SCAN || '2000' }} \
               -e BALANCE_REFRESH_INTERVAL_SECS=${{ vars.BALANCE_REFRESH_INTERVAL_SECS || '60' }} \
