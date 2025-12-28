@@ -62,9 +62,9 @@ impl Config {
             .unwrap_or(4.0);
 
         let min_profit_threshold = env::var("MIN_PROFIT_THRESHOLD")
-            .unwrap_or_else(|_| "0.05".to_string())
+            .unwrap_or_else(|_| "0.3".to_string())
             .parse::<f64>()
-            .unwrap_or(0.05);
+            .unwrap_or(0.3);
 
         let trading_fee_rate = env::var("TRADING_FEE_RATE")
             .unwrap_or_else(|_| "0.00075".to_string())
@@ -92,24 +92,24 @@ impl Config {
             .unwrap_or(100);
 
         let min_volume_24h_usd = env::var("MIN_VOLUME_24H_USD")
-            .unwrap_or_else(|_| "2000.0".to_string())
+            .unwrap_or_else(|_| "50000.0".to_string())
             .parse::<f64>()
-            .unwrap_or(2000.0);
+            .unwrap_or(50000.0);
 
         let min_bid_size_usd = env::var("MIN_BID_SIZE_USD")
-            .unwrap_or_else(|_| "100.0".to_string())
+            .unwrap_or_else(|_| "300.0".to_string())
             .parse::<f64>()
-            .unwrap_or(100.0);
+            .unwrap_or(300.0);
 
         let min_ask_size_usd = env::var("MIN_ASK_SIZE_USD")
-            .unwrap_or_else(|_| "50.0".to_string())
+            .unwrap_or_else(|_| "300.0".to_string())
             .parse::<f64>()
-            .unwrap_or(50.0);
+            .unwrap_or(300.0);
 
         let max_spread_percent = env::var("MAX_SPREAD_PERCENT")
-            .unwrap_or_else(|_| "1.0".to_string())
+            .unwrap_or_else(|_| "0.4".to_string())
             .parse::<f64>()
-            .unwrap_or(1.0);
+            .unwrap_or(0.4);
 
         let min_trade_amount_usd = env::var("MIN_TRADE_AMOUNT_USD")
             .unwrap_or_else(|_| "10.0".to_string())
