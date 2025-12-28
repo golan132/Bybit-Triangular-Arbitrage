@@ -221,8 +221,8 @@ async fn main() -> Result<()> {
                 cycle_count += 1;
                 match res {
                     Ok(opp) => {
-                        // Only log every 100 cycles to reduce spam
-                        if cycle_count % 100 == 0 {
+                        // Only log every 10000 cycles to reduce spam
+                        if cycle_count % 100000 == 0 {
                             log_success("Status", &format!("Completed {cycle_count} cycles successfully (Trades: {trades_completed}/{max_trades})"));
                         }
                         opp
@@ -336,8 +336,8 @@ async fn scan_arbitrage_cycle(
 ) -> Result<Option<crate::models::ArbitrageOpportunity>> {
     let cycle_start = Instant::now();
 
-    // Only log cycle start every 50 cycles to reduce spam
-    if cycle_count.is_multiple_of(50) {
+    // Only log cycle start every 10000 cycles to reduce spam
+    if cycle_count.is_multiple_of(100000) {
         info!("🔄 Cycle #{cycle_count} - Scanning for arbitrage opportunities");
     }
 
