@@ -231,7 +231,7 @@ impl PairManager {
         }
 
         if blacklisted_count > 0 {
-            info!(
+            debug!(
                 "🚫 Filtered out {} pairs containing blacklisted tokens",
                 blacklisted_count
             );
@@ -245,7 +245,7 @@ impl PairManager {
         // Rebuild triangle cache after updating pairs
         self.rebuild_triangle_cache();
 
-        info!(
+        debug!(
             "✅ Updated {} trading pairs with current prices",
             self.pairs.len()
         );
@@ -258,7 +258,7 @@ impl PairManager {
     /// Rebuild the cache of triangle definitions
     /// This is an expensive operation but only needs to run when pairs change
     fn rebuild_triangle_cache(&mut self) {
-        info!("🔄 Rebuilding triangle cache...");
+        debug!("🔄 Rebuilding triangle cache...");
         self.triangle_cache.clear();
 
         let currencies = self.get_all_currencies();
@@ -346,7 +346,7 @@ impl PairManager {
             }
         }
 
-        info!(
+        debug!(
             "✅ Triangle cache rebuilt: {} triangles cached",
             total_triangles
         );
@@ -426,16 +426,16 @@ impl PairManager {
         let stats = self.get_statistics();
         let liquid_pairs = self.pairs.iter().filter(|p| p.is_liquid).count();
 
-        info!("📊 Pair Statistics:");
-        info!("  Total pairs: {}", stats.total_pairs);
-        info!("  Active pairs: {}", stats.active_pairs);
-        info!(
+        debug!("📊 Pair Statistics:");
+        debug!("  Total pairs: {}", stats.total_pairs);
+        debug!("  Active pairs: {}", stats.active_pairs);
+        debug!(
             "  Liquid pairs: {} ({:.1}%)",
             liquid_pairs,
             (liquid_pairs as f64 / stats.total_pairs as f64) * 100.0
         );
-        info!("  Total currencies: {}", stats.total_currencies);
-        info!(
+        debug!("  Total currencies: {}", stats.total_currencies);
+        debug!(
             "  Price range: {:.8} - {:.8}",
             stats.min_price, stats.max_price
         );
@@ -448,14 +448,14 @@ impl PairManager {
         } else {
             0.0
         };
-        info!("  Total 24h volume: ${:.0}", total_volume);
-        info!("  Average 24h volume: ${:.0}", avg_volume);
+        debug!("  Total 24h volume: ${:.0}", total_volume);
+        debug!("  Average 24h volume: ${:.0}", avg_volume);
 
         // Show liquidity thresholds
-        info!("🧪 Liquidity Filters:");
-        info!("  Min 24h volume: ${:.0}", self.config.min_volume_24h_usd);
-        info!("  Max spread: {:.1}%", self.config.max_spread_percent);
-        info!("  Min trade size: ${:.0}", self.config.min_trade_amount_usd);
+        debug!("🧪 Liquidity Filters:");
+        debug!("  Min 24h volume: ${:.0}", self.config.min_volume_24h_usd);
+        debug!("  Max spread: {:.1}%", self.config.max_spread_percent);
+        debug!("  Min trade size: ${:.0}", self.config.min_trade_amount_usd);
 
         // Log some popular currencies
         let popular_currencies = ["USDT", "BTC", "ETH", "BNB", "USDC"];
@@ -494,9 +494,9 @@ impl PairManager {
             .max_by(|a, b| a.partial_cmp(b).unwrap())
             .unwrap_or(&0.0);
 
-        info!("📈 Bid/Ask Spread Analysis:");
-        info!("  Average spread: {:.4}%", avg_spread);
-        info!("  Spread range: {:.4}% - {:.4}%", min_spread, max_spread);
+        debug!("📈 Bid/Ask Spread Analysis:");
+        debug!("  Average spread: {:.4}%", avg_spread);
+        debug!("  Spread range: {:.4}% - {:.4}%", min_spread, max_spread);
 
         // Show some examples of major pairs
         let major_pairs = ["BTCUSDT", "ETHUSDT", "BNBUSDT"];
