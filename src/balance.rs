@@ -20,7 +20,7 @@ impl BalanceManager {
 
     /// Fetch and update account balances
     pub async fn update_balances(&mut self, client: &BybitClient) -> Result<()> {
-        info!("Updating account balances...");
+        debug!("Updating account balances...");
 
         // Try different account types to find balances in parallel
         let account_types = ["UNIFIED", "SPOT", "CONTRACT"];
@@ -87,14 +87,14 @@ impl BalanceManager {
                     }
                 }
                 Err(e) => {
-                    warn!("Failed to fetch {account_type} balance: {e}");
+                    debug!("Failed to fetch {account_type} balance: {e}");
                 }
             }
         }
 
         self.last_updated = Some(chrono::Utc::now());
 
-        info!("✅ Updated balances for {} assets", self.balances.len());
+        debug!("✅ Updated balances for {} assets", self.balances.len());
         self.log_balances();
 
         Ok(())
@@ -139,11 +139,11 @@ impl BalanceManager {
             return;
         }
 
-        info!("Current account balances:");
+        debug!("Current account balances:");
         for (coin, balance) in &self.balances {
             if *balance > 0.001 {
                 // Only log significant balances
-                info!("  {coin} = {balance:.6}");
+                debug!("  {coin} = {balance:.6}");
             }
         }
     }
