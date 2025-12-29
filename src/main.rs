@@ -489,8 +489,6 @@ async fn scan_arbitrage_cycle(
     Ok(None)
 }
 
-
-
 /// Create a sample .env file for configuration
 pub fn create_sample_env_file() -> Result<()> {
     use std::fs;
