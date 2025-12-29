@@ -3,7 +3,7 @@ use crate::config::{self, Config};
 use crate::models::MarketPair;
 use anyhow::{Context, Result};
 use std::collections::HashMap;
-use tracing::{debug, info};
+use tracing::debug;
 
 #[derive(Debug, Clone)]
 pub struct TriangleDefinition {
@@ -162,7 +162,7 @@ impl PairManager {
 
     /// Fetch all trading pairs and their current prices
     pub async fn update_pairs_and_prices(&mut self, client: &BybitClient) -> Result<()> {
-        info!("🔄 Updating trading pairs and prices...");
+        debug!("🔄 Updating trading pairs and prices...");
 
         // Fetch instruments
         let instruments = client

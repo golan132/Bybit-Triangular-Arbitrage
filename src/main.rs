@@ -12,7 +12,7 @@ mod websocket;
 use anyhow::{Context, Result};
 use std::time::Instant;
 use tokio::time::{sleep, Duration};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use arbitrage::ArbitrageEngine;
 use balance::BalanceManager;
@@ -39,16 +39,16 @@ async fn main() -> Result<()> {
     check_api_latency().await;
 
     // Load configuration
-    log_phase("init", "Loading configuration");
+    info!("🔧 INIT: Loading configuration");
     let config = Config::from_env().context("Failed to load configuration")?;
     log_startup_info(&config);
 
     // Create Bybit client
     let client = BybitClient::new(config.clone()).context("Failed to create Bybit client")?;
-    log_success("Initialization", "Bybit client created successfully");
+    info!("✅ Initialization: Bybit client created successfully");
 
     // Wait for API connection (IP whitelist check)
-    log_phase("init", "Verifying API connection and IP whitelist...");
+    info!("🔧 INIT: Verifying API connection and IP whitelist...");
     loop {
         match client.get_wallet_balance(None).await {
             Ok(_) => {
@@ -80,7 +80,7 @@ async fn main() -> Result<()> {
     );
 
     // Initialize precision manager with dynamic data from Bybit
-    log_phase("init", "Fetching precision data from Bybit API");
+    info!("🔧 INIT: Fetching precision data from Bybit API");
     let mut precision_manager = PrecisionManager::new();
 
     // Load cached precision data if available
@@ -127,7 +127,7 @@ async fn main() -> Result<()> {
     }
 
     // Initial pair fetch to populate symbols
-    log_phase("init", "Fetching initial trading pairs");
+    info!("🔧 INIT: Fetching initial trading pairs");
     loop {
         match pair_manager.update_pairs_and_prices(&client).await {
             Ok(_) => break,
@@ -223,7 +223,7 @@ async fn main() -> Result<()> {
                     Ok(opp) => {
                         // Only log every 10000 cycles to reduce spam
                         if cycle_count % 100000 == 0 {
-                            log_success("Status", &format!("Completed {cycle_count} cycles successfully (Trades: {trades_completed}/{max_trades})"));
+                            debug!("✅ Status: Completed {cycle_count} cycles successfully (Trades: {trades_completed}/{max_trades})");
                         }
                         opp
                     },
@@ -338,14 +338,14 @@ async fn scan_arbitrage_cycle(
 
     // Only log cycle start every 10000 cycles to reduce spam
     if cycle_count.is_multiple_of(100000) {
-        info!("🔄 Cycle #{cycle_count} - Scanning for arbitrage opportunities");
+        debug!("🔄 Cycle #{cycle_count} - Scanning for arbitrage opportunities");
     }
 
     // Phase 1: Update account balances
     let mut balance_updated = false;
     if balance_manager.needs_refresh(config.balance_refresh_interval_secs) {
         if cycle_count.is_multiple_of(100) {
-            log_phase("balance", "Refreshing account balances");
+            debug!("💰 BALANCE: Refreshing account balances");
         }
         let balance_start = Instant::now();
 
@@ -380,9 +380,8 @@ async fn scan_arbitrage_cycle(
 
     let mut prices_updated = false;
     if needs_full_refresh {
-        log_phase(
-            "pairs",
-            "Performing FULL refresh of trading pairs and prices (Instruments + Tickers)",
+        debug!(
+            "📊 PAIRS: Performing FULL refresh of trading pairs and prices (Instruments + Tickers)"
         );
         let pairs_start = Instant::now();
 
@@ -412,7 +411,7 @@ async fn scan_arbitrage_cycle(
         if updates_count > 0 {
             prices_updated = true;
             if cycle_count.is_multiple_of(100) {
-                info!("⚡ Processed {updates_count} WebSocket ticker updates");
+                debug!("⚡ Processed {updates_count} WebSocket ticker updates");
             }
         } else if cycle_count.is_multiple_of(100) {
             // Only warn if we haven't received updates for a while
@@ -468,10 +467,10 @@ async fn scan_arbitrage_cycle(
 
         log_arbitrage_statistics(&arbitrage_engine.get_statistics());
 
-        info!("📊 Cycle #{} Summary:", cycle_count);
-        info!("  • Trading pairs: {}", pair_manager.get_pairs().len());
-        info!("  • Total opportunities: {}", opportunities.len());
-        info!("  • Cycle time: {:.2}ms", cycle_duration.as_millis());
+        debug!("📊 Cycle #{} Summary:", cycle_count);
+        debug!("  • Trading pairs: {}", pair_manager.get_pairs().len());
+        debug!("  • Total opportunities: {}", opportunities.len());
+        debug!("  • Cycle time: {:.2}ms", cycle_duration.as_millis());
     }
 
     Ok(None)

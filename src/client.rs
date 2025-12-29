@@ -202,7 +202,7 @@ impl BybitClient {
         category: &str,
         limit: Option<u32>,
     ) -> Result<InstrumentsInfoResult> {
-        info!("Fetching instruments info for category: {}", category);
+        debug!("Fetching instruments info for category: {}", category);
 
         let mut query_params = format!("category={category}");
         if let Some(lmt) = limit {
@@ -216,7 +216,7 @@ impl BybitClient {
             )
             .await?;
 
-        info!(
+        debug!(
             "Successfully fetched {} instruments for category {}",
             result.list.len(),
             category
@@ -226,7 +226,7 @@ impl BybitClient {
 
     /// Fetch all spot instruments with pagination
     pub async fn get_all_spot_instruments(&self) -> Result<Vec<InstrumentInfo>> {
-        info!("Fetching all spot instruments...");
+        debug!("Fetching all spot instruments...");
 
         let mut all_instruments = Vec::new();
         let mut cursor: Option<String> = None;
@@ -260,7 +260,7 @@ impl BybitClient {
             page += 1;
         }
 
-        info!(
+        debug!(
             "Successfully fetched {} total spot instruments across {} pages",
             all_instruments.len(),
             page
