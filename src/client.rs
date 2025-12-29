@@ -25,7 +25,13 @@ impl BybitClient {
             .tcp_nodelay(true)
             .tcp_keepalive(std::time::Duration::from_secs(60)) // Keep connections alive
             .pool_idle_timeout(None) // Never close idle connections automatically
-            .pool_max_idle_per_host(10) // Keep up to 10 connections open per host
+            .pool_max_idle_per_host(20) // Increased pool size for parallel requests
+            .http2_adaptive_window(true) // Optimize HTTP/2 flow control
+            .http2_keep_alive_interval(Some(std::time::Duration::from_secs(15))) // Send HTTP/2 PING frames
+            .http2_keep_alive_timeout(std::time::Duration::from_secs(10))
+            .http2_keep_alive_while_idle(true) // Keep connection alive even when idle
+            .gzip(true) // Enable GZIP compression
+            .brotli(true) // Enable Brotli compression
             .default_headers(headers)
             .build()?;
 

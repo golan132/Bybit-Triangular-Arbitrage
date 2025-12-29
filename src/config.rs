@@ -47,9 +47,9 @@ impl Config {
         };
 
         let request_timeout_secs = env::var("REQUEST_TIMEOUT_SECS")
-            .unwrap_or_else(|_| "30".to_string())
+            .unwrap_or_else(|_| "10".to_string())
             .parse::<u64>()
-            .unwrap_or(30);
+            .unwrap_or(10);
 
         let max_retries = env::var("MAX_RETRIES")
             .unwrap_or_else(|_| "3".to_string())
@@ -62,9 +62,9 @@ impl Config {
             .unwrap_or(4.0);
 
         let min_profit_threshold = env::var("MIN_PROFIT_THRESHOLD")
-            .unwrap_or_else(|_| "0.3".to_string())
+            .unwrap_or_else(|_| "0.5".to_string()) // Increased to 0.5% to cover dust/slippage
             .parse::<f64>()
-            .unwrap_or(0.3);
+            .unwrap_or(0.5);
 
         let trading_fee_rate = env::var("TRADING_FEE_RATE")
             .unwrap_or_else(|_| "0.00075".to_string())
