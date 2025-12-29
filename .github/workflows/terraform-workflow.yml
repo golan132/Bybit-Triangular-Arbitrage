@@ -143,4 +143,4 @@ jobs:
         uses: ./.github/actions/terraform-apply
         with:
           working_directory: ./infrastructure
-          var_file: environments/prod/prod.tfvars
+          var_file: ${{ env.TF_VAR_FILE }}
