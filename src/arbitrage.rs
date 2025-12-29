@@ -47,7 +47,10 @@ impl ArbitrageEngine {
         min_trade_amount: f64,
     ) -> Vec<ArbitrageOpportunity> {
         self.opportunities.clear();
-        let tradeable_coins = balance_manager.get_tradeable_coins(min_trade_amount);
+        let mut tradeable_coins = balance_manager.get_tradeable_coins(min_trade_amount);
+
+        // Exclude MNT from being a base currency (start of loop) to preserve it for fees
+        tradeable_coins.retain(|coin| coin != "MNT");
 
         let coins_to_scan = if tradeable_coins.is_empty() {
             debug!("No tradeable coins with balance >= ${:.0}, scanning popular currencies for reference", min_trade_amount);
