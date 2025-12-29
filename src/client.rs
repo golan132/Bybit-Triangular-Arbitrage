@@ -38,6 +38,15 @@ impl BybitClient {
         Ok(BybitClient { client, config })
     }
 
+    /// Check connection to Bybit API and return latency in milliseconds
+    pub async fn check_connection(&self) -> Result<f64> {
+        let start = std::time::Instant::now();
+        let url = format!("{}/v5/market/time", self.config.base_url);
+        let _response: serde_json::Value = self.public_request(&url, "").await?;
+        let duration = start.elapsed();
+        Ok(duration.as_secs_f64() * 1000.0)
+    }
+
     /// Generate HMAC SHA256 signature for Bybit API
     fn generate_signature(
         &self,
