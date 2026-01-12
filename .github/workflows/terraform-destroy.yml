@@ -1,0 +1,61 @@
+name: Terraform Destroy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to destroy"
+        required: true
+        default: "Development"
+        type: choice
+        options:
+          - Development
+          - Production
+      confirmation:
+        description: 'Type "DESTROY" to confirm destruction of resources'
+        required: true
+        default: "NO"
+
+permissions:
+  contents: read
+
+jobs:
+  destroy:
+    name: "Terraform Destroy"
+    runs-on: ubuntu-latest
+    if: inputs.confirmation == 'DESTROY'
+    environment:
+      name: ${{ inputs.environment }}
+    defaults:
+      run:
+        working-directory: ./infrastructure
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set Environment
+        uses: ./.github/actions/set-env
+        with:
+          environment: ${{ inputs.environment }}
+
+      - name: Setup OCI Credentials
+        uses: ./.github/actions/assume-oci-role
+        with:
+          oci_private_key: ${{ secrets.OCI_PRIVATE_KEY }}
+          oci_tenancy_ocid: ${{ secrets.OCI_TENANCY_OCID }}
+          oci_user_ocid: ${{ secrets.OCI_USER_OCID }}
+          oci_fingerprint: ${{ secrets.OCI_FINGERPRINT }}
+          oci_region: ${{ secrets.OCI_REGION }}
+          ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: latest
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Destroy
+        run: terraform destroy -auto-approve -var-file="${{ env.TF_VAR_FILE }}"
