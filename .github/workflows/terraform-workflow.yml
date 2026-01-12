@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: 'Environment to deploy to'
+        description: "Environment to deploy to"
         required: true
-        default: 'Development'
+        default: "Development"
         type: choice
         options:
           - Development
@@ -143,4 +143,4 @@ jobs:
         uses: ./.github/actions/terraform-apply
         with:
           working_directory: ./infrastructure
-          var_file: environments/prod/prod.tfvars
+          var_file: ${{ env.TF_VAR_FILE }}

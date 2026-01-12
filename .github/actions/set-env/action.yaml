@@ -3,7 +3,7 @@ description: Determines the target environment and sets TF_VAR_FILE
 
 inputs:
   environment:
-    description: 'Manual environment input (Development/Production)'
+    description: "Manual environment input (Development/Production)"
     required: false
 
 runs:
@@ -14,7 +14,7 @@ runs:
       run: |
         # Determine environment from input or branch
         TARGET_ENV="${{ inputs.environment }}"
-        
+
         # If no input, fallback to branch logic
         if [[ -z "$TARGET_ENV" ]]; then
           if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
@@ -23,9 +23,9 @@ runs:
             TARGET_ENV="Development"
           fi
         fi
-        
+
         echo "Selected Environment: $TARGET_ENV"
-        
+
         if [[ "$TARGET_ENV" == "Production" ]]; then
           echo "TF_VAR_FILE=environments/prod/prod.tfvars" >> $GITHUB_ENV
         else

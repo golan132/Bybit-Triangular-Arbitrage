@@ -25,11 +25,26 @@ impl BybitClient {
             .tcp_nodelay(true)
             .tcp_keepalive(std::time::Duration::from_secs(60)) // Keep connections alive
             .pool_idle_timeout(None) // Never close idle connections automatically
-            .pool_max_idle_per_host(10) // Keep up to 10 connections open per host
+            .pool_max_idle_per_host(20) // Increased pool size for parallel requests
+            .http2_adaptive_window(true) // Optimize HTTP/2 flow control
+            .http2_keep_alive_interval(Some(std::time::Duration::from_secs(15))) // Send HTTP/2 PING frames
+            .http2_keep_alive_timeout(std::time::Duration::from_secs(10))
+            .http2_keep_alive_while_idle(true) // Keep connection alive even when idle
+            .gzip(true) // Enable GZIP compression
+            .brotli(true) // Enable Brotli compression
             .default_headers(headers)
             .build()?;
 
         Ok(BybitClient { client, config })
+    }
+
+    /// Check connection to Bybit API and return latency in milliseconds
+    pub async fn check_connection(&self) -> Result<f64> {
+        let start = std::time::Instant::now();
+        let url = format!("{}/v5/market/time", self.config.base_url);
+        let _response: serde_json::Value = self.public_request(&url, "").await?;
+        let duration = start.elapsed();
+        Ok(duration.as_secs_f64() * 1000.0)
     }
 
     /// Generate HMAC SHA256 signature for Bybit API
@@ -202,7 +217,7 @@ impl BybitClient {
         category: &str,
         limit: Option<u32>,
     ) -> Result<InstrumentsInfoResult> {
-        info!("Fetching instruments info for category: {}", category);
+        debug!("Fetching instruments info for category: {}", category);
 
         let mut query_params = format!("category={category}");
         if let Some(lmt) = limit {
@@ -216,7 +231,7 @@ impl BybitClient {
             )
             .await?;
 
-        info!(
+        debug!(
             "Successfully fetched {} instruments for category {}",
             result.list.len(),
             category
@@ -226,7 +241,7 @@ impl BybitClient {
 
     /// Fetch all spot instruments with pagination
     pub async fn get_all_spot_instruments(&self) -> Result<Vec<InstrumentInfo>> {
-        info!("Fetching all spot instruments...");
+        debug!("Fetching all spot instruments...");
 
         let mut all_instruments = Vec::new();
         let mut cursor: Option<String> = None;
@@ -260,7 +275,7 @@ impl BybitClient {
             page += 1;
         }
 
-        info!(
+        debug!(
             "Successfully fetched {} total spot instruments across {} pages",
             all_instruments.len(),
             page

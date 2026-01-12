@@ -1,3 +1,4 @@
+use crate::config::Config;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -322,7 +323,7 @@ pub struct MarketPair {
 }
 
 impl MarketPair {
-    pub fn new(instrument: &InstrumentInfo, ticker: &TickerInfo) -> Option<Self> {
+    pub fn new(instrument: &InstrumentInfo, ticker: &TickerInfo, config: &Config) -> Option<Self> {
         if instrument.status != "Trading" {
             return None;
         }
@@ -394,10 +395,10 @@ impl MarketPair {
         }
 
         // Determine liquidity based on volume and spread
-        let is_liquid = volume_24h_usd >= crate::config::MIN_VOLUME_24H_USD
-            && spread_percent <= crate::config::MAX_SPREAD_PERCENT
-            && bid_size * bid_price >= crate::config::MIN_BID_SIZE_USD
-            && ask_size * ask_price >= crate::config::MIN_ASK_SIZE_USD;
+        let is_liquid = volume_24h_usd >= config.min_volume_24h_usd
+            && spread_percent <= config.max_spread_percent
+            && bid_size * bid_price >= config.min_bid_size_usd
+            && ask_size * ask_price >= config.min_ask_size_usd;
 
         Some(MarketPair {
             base: instrument.base_coin.clone(),

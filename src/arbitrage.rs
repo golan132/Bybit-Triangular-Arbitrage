@@ -1,7 +1,6 @@
 use crate::balance::BalanceManager;
-use crate::config::{MAX_TRIANGLES_TO_SCAN, MIN_PROFIT_THRESHOLD};
 use crate::models::ArbitrageOpportunity;
-use crate::pairs::{PairManager, TrianglePairs};
+use crate::pairs::{PairManager, TriangleDefinition};
 use chrono::Utc;
 use rayon::prelude::*;
 use tracing::debug;
@@ -18,8 +17,8 @@ impl ArbitrageEngine {
     pub fn new() -> Self {
         Self {
             opportunities: Vec::new(),
-            profit_threshold: MIN_PROFIT_THRESHOLD,
-            max_scan_count: MAX_TRIANGLES_TO_SCAN,
+            profit_threshold: 0.05,
+            max_scan_count: 2000,
             trading_fee_rate: 0.001, // 0.1% trading fee
             global_best: None,
         }
@@ -48,7 +47,10 @@ impl ArbitrageEngine {
         min_trade_amount: f64,
     ) -> Vec<ArbitrageOpportunity> {
         self.opportunities.clear();
-        let tradeable_coins = balance_manager.get_tradeable_coins(min_trade_amount);
+        let mut tradeable_coins = balance_manager.get_tradeable_coins(min_trade_amount);
+
+        // Exclude MNT from being a base currency (start of loop) to preserve it for fees
+        tradeable_coins.retain(|coin| coin != "MNT");
 
         let coins_to_scan = if tradeable_coins.is_empty() {
             debug!("No tradeable coins with balance >= ${:.0}, scanning popular currencies for reference", min_trade_amount);
@@ -158,7 +160,10 @@ impl ArbitrageEngine {
         Vec<ArbitrageOpportunity>,
         Option<ArbitrageOpportunity>,
     ) {
-        let triangles = pair_manager.find_triangle_pairs(base_currency);
+        let empty_vec = Vec::new();
+        let triangles = pair_manager
+            .get_cached_triangles(base_currency)
+            .unwrap_or(&empty_vec);
         let mut scanned_count = 0;
         let mut found_opportunities = Vec::new();
         let mut best_opp: Option<ArbitrageOpportunity> = None;
@@ -194,74 +199,76 @@ impl ArbitrageEngine {
     /// Check if triangle meets minimum liquidity requirements
     fn is_triangle_liquid_enough(
         &self,
-        triangle: &TrianglePairs,
+        triangle: &TriangleDefinition,
         pair_manager: &PairManager,
         test_amount: f64,
     ) -> bool {
-        let pair1 = pair_manager.get_pair_by_symbol(&triangle.pair1.symbol);
-        let pair2 = pair_manager.get_pair_by_symbol(&triangle.pair2.symbol);
-        let pair3 = pair_manager.get_pair_by_symbol(&triangle.pair3.symbol);
+        // Access pairs directly by index - O(1)
+        let p1 = &pair_manager.pairs[triangle.indices[0]];
+        let p2 = &pair_manager.pairs[triangle.indices[1]];
+        let p3 = &pair_manager.pairs[triangle.indices[2]];
 
-        if let (Some(p1), Some(p2), Some(p3)) = (pair1, pair2, pair3) {
-            let pairs = [p1, p2, p3];
-            let min_trade_size_usd = test_amount.max(crate::config::MIN_TRADE_AMOUNT_USD);
+        let pairs = [p1, p2, p3];
+        let min_trade_size_usd = test_amount.max(pair_manager.config.min_trade_amount_usd);
 
-            for pair in &pairs {
-                // Volume filter - must have sufficient 24h volume
-                if pair.volume_24h_usd < crate::config::MIN_VOLUME_24H_USD {
-                    debug!(
-                        "❌ {} failed volume check: ${:.0} < ${:.0}",
-                        pair.symbol,
-                        pair.volume_24h_usd,
-                        crate::config::MIN_VOLUME_24H_USD
-                    );
-                    return false;
-                }
-
-                // Spread filter - spread must be reasonable
-                if pair.spread_percent > crate::config::MAX_SPREAD_PERCENT {
-                    debug!(
-                        "❌ {} failed spread check: {:.2}% > {:.2}%",
-                        pair.symbol,
-                        pair.spread_percent,
-                        crate::config::MAX_SPREAD_PERCENT
-                    );
-                    return false;
-                }
-
-                // Size filter - must have enough bid/ask size for our trade
-                let bid_size_usd = pair.bid_size * pair.bid_price;
-                let ask_size_usd = pair.ask_size * pair.ask_price;
-
-                if bid_size_usd < min_trade_size_usd || ask_size_usd < min_trade_size_usd {
-                    debug!(
-                        "❌ {} failed size check: bid ${:.0}, ask ${:.0} < ${:.0}",
-                        pair.symbol, bid_size_usd, ask_size_usd, min_trade_size_usd
-                    );
-                    return false;
-                }
-
-                // Liquidity flag check
-                if !pair.is_liquid {
-                    debug!("❌ {} marked as illiquid", pair.symbol);
-                    return false;
-                }
+        for pair in &pairs {
+            // Volume filter - must have sufficient 24h volume
+            if pair.volume_24h_usd < pair_manager.config.min_volume_24h_usd {
+                // debug!(
+                //     "❌ {} failed volume check: ${:.0} < ${:.0}",
+                //     pair.symbol,
+                //     pair.volume_24h_usd,
+                //     pair_manager.config.min_volume_24h_usd
+                // );
+                return false;
             }
-            true
-        } else {
-            false
+
+            // Spread filter - spread must be reasonable
+            if pair.spread_percent > pair_manager.config.max_spread_percent {
+                // debug!(
+                //     "❌ {} failed spread check: {:.2}% > {:.2}%",
+                //     pair.symbol,
+                //     pair.spread_percent,
+                //     pair_manager.config.max_spread_percent
+                // );
+                return false;
+            }
+
+            // Size filter - must have enough bid/ask size for our trade
+            let bid_size_usd = pair.bid_size * pair.bid_price;
+            let ask_size_usd = pair.ask_size * pair.ask_price;
+
+            if bid_size_usd < min_trade_size_usd || ask_size_usd < min_trade_size_usd {
+                // debug!(
+                //     "❌ {} failed size check: bid ${:.0}, ask ${:.0} < ${:.0}",
+                //     pair.symbol, bid_size_usd, ask_size_usd, min_trade_size_usd
+                // );
+                return false;
+            }
+
+            // Liquidity flag check
+            if !pair.is_liquid {
+                // debug!("❌ {} marked as illiquid", pair.symbol);
+                return false;
+            }
         }
+        true
     }
 
     /// Calculate profit for a specific triangle using realistic bid/ask prices
     fn calculate_arbitrage_profit(
         &self,
-        triangle: &TrianglePairs,
+        triangle: &TriangleDefinition,
         initial_amount: f64,
-        _pair_manager: &PairManager,
+        pair_manager: &PairManager,
     ) -> Option<ArbitrageOpportunity> {
         let path = &triangle.path;
-        let pairs = [&triangle.pair1, &triangle.pair2, &triangle.pair3];
+        // Access pairs directly by index - O(1)
+        let p1 = &pair_manager.pairs[triangle.indices[0]];
+        let p2 = &pair_manager.pairs[triangle.indices[1]];
+        let p3 = &pair_manager.pairs[triangle.indices[2]];
+
+        let pairs = [p1, p2, p3];
         let mut prices = Vec::with_capacity(3);
 
         // Use a reasonable test amount (10% of balance or $100 equivalent)
@@ -318,7 +325,7 @@ impl ArbitrageEngine {
                     * (initial_amount / test_amount)
             };
 
-        if profit_pct_with_slippage > -50.0 && profit_pct_with_slippage.is_finite() {
+        if profit_pct_with_slippage > -1.0 && profit_pct_with_slippage.is_finite() {
             // Sanity check: Filter out unrealistic profits (> 100%) which usually indicate bad data
             if profit_pct_with_slippage > 100.0 {
                 debug!(
@@ -332,9 +339,9 @@ impl ArbitrageEngine {
             // Only return reasonable profit calculations
             // Optimization: Only clone strings if we are actually returning an opportunity
             let pair_symbols = vec![
-                triangle.pair1.symbol.clone(),
-                triangle.pair2.symbol.clone(),
-                triangle.pair3.symbol.clone(),
+                pair_manager.pairs[triangle.indices[0]].symbol.clone(),
+                pair_manager.pairs[triangle.indices[1]].symbol.clone(),
+                pair_manager.pairs[triangle.indices[2]].symbol.clone(),
             ];
 
             let opportunity = ArbitrageOpportunity {
@@ -443,86 +450,86 @@ impl ArbitrageStatistics {
 mod tests {
     use super::*;
     use crate::models::MarketPair;
-    use crate::pairs::TrianglePairs;
+    // use crate::pairs::TrianglePairs;
 
-    #[allow(dead_code)]
-    fn create_test_triangle() -> TrianglePairs {
-        let pair1 = MarketPair {
-            base: "BTC".to_string(),
-            quote: "USDT".to_string(),
-            symbol: "BTCUSDT".to_string(),
-            price: 50000.0,
-            bid_price: 50000.0,
-            ask_price: 50000.0,
-            bid_size: 1.0,
-            ask_size: 1.0,
-            volume_24h: 1000.0,
-            volume_24h_usd: 50000000.0,
-            spread_percent: 0.0,
-            min_qty: 0.001,
-            qty_step: 0.001,
-            min_notional: 1.0,
-            is_active: true,
-            is_liquid: true,
-        };
-
-        let pair2 = MarketPair {
-            base: "ETH".to_string(),
-            quote: "BTC".to_string(),
-            symbol: "ETHBTC".to_string(),
-            price: 0.06, // ETH = 0.06 BTC
-            bid_price: 0.06,
-            ask_price: 0.06,
-            bid_size: 10.0,
-            ask_size: 10.0,
-            volume_24h: 10000.0,
-            volume_24h_usd: 30000000.0,
-            spread_percent: 0.0,
-            min_qty: 0.001,
-            qty_step: 0.001,
-            min_notional: 1.0,
-            is_active: true,
-            is_liquid: true,
-        };
-
-        let pair3 = MarketPair {
-            base: "ETH".to_string(),
-            quote: "USDT".to_string(),
-            symbol: "ETHUSDT".to_string(),
-            price: 3100.0, // Slightly higher to create arbitrage opportunity
-            bid_price: 3100.0,
-            ask_price: 3100.0,
-            bid_size: 10.0,
-            ask_size: 10.0,
-            volume_24h: 10000.0,
-            volume_24h_usd: 31000000.0,
-            spread_percent: 0.0,
-            min_qty: 0.001,
-            qty_step: 0.001,
-            min_notional: 1.0,
-            is_active: true,
-            is_liquid: true,
-        };
-
-        TrianglePairs {
-            base_currency: "USDT".to_string(),
-            pair1,
-            pair2,
-            pair3,
-            path: vec![
-                "USDT".to_string(),
-                "BTC".to_string(),
-                "ETH".to_string(),
-                "USDT".to_string(),
-            ],
-        }
-    }
+    // #[allow(dead_code)]
+    // fn create_test_triangle() -> TrianglePairs {
+    //     let pair1 = MarketPair {
+    //         base: "BTC".to_string(),
+    //         quote: "USDT".to_string(),
+    //         symbol: "BTCUSDT".to_string(),
+    //         price: 50000.0,
+    //         bid_price: 50000.0,
+    //         ask_price: 50000.0,
+    //         bid_size: 1.0,
+    //         ask_size: 1.0,
+    //         volume_24h: 1000.0,
+    //         volume_24h_usd: 50000000.0,
+    //         spread_percent: 0.0,
+    //         min_qty: 0.001,
+    //         qty_step: 0.001,
+    //         min_notional: 1.0,
+    //         is_active: true,
+    //         is_liquid: true,
+    //     };
+    //
+    //     let pair2 = MarketPair {
+    //         base: "ETH".to_string(),
+    //         quote: "BTC".to_string(),
+    //         symbol: "ETHBTC".to_string(),
+    //         price: 0.06, // ETH = 0.06 BTC
+    //         bid_price: 0.06,
+    //         ask_price: 0.06,
+    //         bid_size: 10.0,
+    //         ask_size: 10.0,
+    //         volume_24h: 10000.0,
+    //         volume_24h_usd: 30000000.0,
+    //         spread_percent: 0.0,
+    //         min_qty: 0.001,
+    //         qty_step: 0.001,
+    //         min_notional: 1.0,
+    //         is_active: true,
+    //         is_liquid: true,
+    //     };
+    //
+    //     let pair3 = MarketPair {
+    //         base: "ETH".to_string(),
+    //         quote: "USDT".to_string(),
+    //         symbol: "ETHUSDT".to_string(),
+    //         price: 3100.0, // Slightly higher to create arbitrage opportunity
+    //         bid_price: 3100.0,
+    //         ask_price: 3100.0,
+    //         bid_size: 10.0,
+    //         ask_size: 10.0,
+    //         volume_24h: 10000.0,
+    //         volume_24h_usd: 31000000.0,
+    //         spread_percent: 0.0,
+    //         min_qty: 0.001,
+    //         qty_step: 0.001,
+    //         min_notional: 1.0,
+    //         is_active: true,
+    //         is_liquid: true,
+    //     };
+    //
+    //     TrianglePairs {
+    //         base_currency: "USDT".to_string(),
+    //         pair1,
+    //         pair2,
+    //         pair3,
+    //         path: vec![
+    //             "USDT".to_string(),
+    //             "BTC".to_string(),
+    //             "ETH".to_string(),
+    //             "USDT".to_string(),
+    //         ],
+    //     }
+    // }
 
     #[test]
     fn test_arbitrage_engine_creation() {
         let engine = ArbitrageEngine::new();
         assert_eq!(engine.opportunities.len(), 0);
-        assert_eq!(engine.profit_threshold, MIN_PROFIT_THRESHOLD);
+        assert_eq!(engine.profit_threshold, 0.05);
     }
 
     #[test]

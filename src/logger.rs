@@ -38,7 +38,7 @@ pub fn init_logger() -> Result<(), anyhow::Error> {
 }
 
 /// Log configuration with runtime values
-pub fn log_startup_info(min_profit_threshold: f64, trading_fee_rate: f64) {
+pub fn log_startup_info(config: &crate::config::Config) {
     info!(
         "📈 Bybit Triangular Arbitrage Bot v{}",
         env!("CARGO_PKG_VERSION")
@@ -48,28 +48,28 @@ pub fn log_startup_info(min_profit_threshold: f64, trading_fee_rate: f64) {
 
     // Log some configuration info (without sensitive data)
     info!("📋 Configuration:");
-    info!("  • Min Profit Threshold: {:.2}%", min_profit_threshold);
+    info!(
+        "  • Min Profit Threshold: {:.2}%",
+        config.min_profit_threshold
+    );
     info!(
         "  • Trading Fee Rate: {:.2}% per trade",
-        trading_fee_rate * 100.0
+        config.trading_fee_rate * 100.0
     );
     info!(
         "  • Max Triangles to Scan: {}",
-        crate::config::MAX_TRIANGLES_TO_SCAN
+        config.max_triangles_to_scan
     );
     info!(
         "  • Balance Refresh: {}s",
-        crate::config::BALANCE_REFRESH_INTERVAL_SECS
+        config.balance_refresh_interval_secs
     );
-    info!(
-        "  • Price Refresh: {}s",
-        crate::config::PRICE_REFRESH_INTERVAL_SECS
-    );
+    info!("  • Price Refresh: {}s", config.price_refresh_interval_secs);
 }
 
 /// Log arbitrage opportunity in a formatted way
 pub fn log_arbitrage_opportunity(opportunity: &crate::models::ArbitrageOpportunity, rank: usize) {
-    info!(
+    debug!(
         "[OPPORTUNITY #{}] {} | Est. Profit: {:+.2}% (${:.2})",
         rank,
         opportunity.display_path(),
@@ -96,33 +96,17 @@ pub fn log_arbitrage_opportunity(opportunity: &crate::models::ArbitrageOpportuni
 /// Log detailed arbitrage opportunity with bid/ask prices for manual verification
 /// Log balance information in a formatted way
 pub fn log_balance_summary(summary: &crate::balance::BalanceSummary) {
-    info!("💰 {}", summary.display());
+    debug!("💰 {}", summary.display());
 }
 
 /// Log pair statistics in a formatted way
 pub fn log_pair_statistics(stats: &crate::pairs::PairStatistics) {
-    info!("📊 {}", stats.display());
+    debug!("📊 {}", stats.display());
 }
 
 /// Log arbitrage statistics in a formatted way
 pub fn log_arbitrage_statistics(stats: &crate::arbitrage::ArbitrageStatistics) {
-    info!("🔍 {}", stats.display());
-}
-
-/// Log application phases with emojis
-pub fn log_phase(phase: &str, message: &str) {
-    let emoji = match phase {
-        "init" => "🔧",
-        "balance" => "💰",
-        "pairs" => "📊",
-        "arbitrage" => "🔍",
-        "analysis" => "📈",
-        "complete" => "✅",
-        "error" => "❌",
-        _ => "ℹ️",
-    };
-
-    info!("{} {}: {}", emoji, phase.to_uppercase(), message);
+    debug!("🔍 {}", stats.display());
 }
 
 /// Log errors with context

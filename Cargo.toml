@@ -7,7 +7,7 @@ authors = ["Your Name <your.email@example.com>"]
 
 [dependencies]
 tokio = { version = "1.0", features = ["full"] }
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.11", features = ["json", "gzip", "brotli"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tracing = "0.1"
@@ -25,6 +25,14 @@ simd-json = { version = "0.13", features = ["serde_impl"] }
 tokio-tungstenite = { version = "0.28.0", features = ["native-tls"] }
 futures-util = "0.3.31"
 url = "2.5.7"
+mimalloc = { version = "0.1", default-features = false }
 
 [dev-dependencies]
 mockito = "1.0"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
